@@ -20,6 +20,86 @@ pub enum Exp {
 }
 
 impl Exp {
+    pub fn print(&self) {
+        match *self {
+            Exp::Int(i) => print!("{}", i),
+            Exp::Null => print!("null"),
+            Exp::Printf(ref printf) => {
+                print!("printf({:?}", printf.format);
+                for exp in &printf.exps {
+                    print!(", ");
+                    exp.print();
+                }
+                print!(")");
+            }
+            Exp::Array(ref array) => {
+                print!("array(");
+                array.length.print();
+                print!(", ");
+                array.init.print();
+                print!(")");
+            }
+            Exp::Object(ref obj) => {
+                print!("object : (");
+                for slot in &obj.slots {
+                    slot.print();
+                }
+                print!(")");
+            }
+            Exp::Slot(ref slot) => {
+                slot.exp.print();
+                print!(".{:?}", slot.name);
+            }
+            Exp::SetSlot(ref setslot) => {
+                setslot.exp.print();
+                print!(".{:?} = ", setslot.name);
+                setslot.value.print();
+            }
+            Exp::CallSlot(ref callslot) => {
+                callslot.exp.print();
+                print!(".{:?}(", callslot.name);
+                for (i, arg) in callslot.args.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    arg.print();
+                }
+                print!(")");
+            }
+            Exp::Call(ref call) => {
+                print!("{:?}(", call.name);
+                for (i, arg) in call.args.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    arg.print();
+                }
+                print!(")");
+            }
+            Exp::Set(ref set) => {
+                print!("{:?} = ", set.name);
+                set.exp.print();
+            }
+            Exp::If(ref iexp) => {
+                print!("if ");
+                iexp.pred.print();
+                print!(" : (");
+                iexp.conseq.print();
+                print!(") else : (");
+                iexp.alt.print();
+                print!(")");
+            }
+            Exp::While(ref wexp) => {
+                print!("while ");
+                wexp.pred.print();
+                print!(" : (");
+                wexp.body.print();
+                print!(")");
+            }
+            Exp::Ref(ref name) => print!("{:?}", name),
+        }
+    }
+
     pub fn read(f: &mut File) -> io::Result<Exp> {
         let tag = try!(read_int(f));
         match AstTag::from_i32(tag) {
@@ -141,6 +221,27 @@ pub enum SlotStmt {
 }
 
 impl SlotStmt {
+    pub fn print(&self) {
+        match *self {
+            SlotStmt::Var(ref vstmt) => {
+                print!("var {:?} = ", vstmt.name);
+                vstmt.exp.print();
+            }
+            SlotStmt::Method(ref method) => {
+                print!("method {:?} (", method.name);
+                for (i, arg) in method.args.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    print!("{:?}", arg);
+                }
+                print!(") : (");
+                method.body.print();
+                print!(")");
+            }
+        }
+    }
+
     pub fn read(f: &mut File) -> io::Result<SlotStmt> {
         let tag = try!(read_int(f));
 
@@ -180,6 +281,33 @@ pub enum ScopeStmt {
 }
 
 impl ScopeStmt {
+    pub fn print(&self) {
+        match *self {
+            ScopeStmt::Var(ref varstmt) => {
+                print!("var {:?} = ", varstmt.name);
+                varstmt.exp.print();
+            }
+            ScopeStmt::Fn(ref fnstmt) => {
+                print!("defn {:?} (", fnstmt.name);
+                for (i, arg) in fnstmt.args.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    print!("{:?}", arg);
+                }
+                print!(") : (");
+                fnstmt.body.print();
+                print!(")");
+            }
+            ScopeStmt::Seq(ref seq) => {
+                seq.a.print();
+                print!(" ");
+                seq.b.print();
+            }
+            ScopeStmt::Exp(ref exp) => exp.print(),
+        }
+    }
+
     pub fn read(f: &mut File) -> io::Result<ScopeStmt> {
         let tag = try!(read_int(f));
 
