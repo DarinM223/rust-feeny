@@ -3,6 +3,14 @@ use std::io;
 use std::io::prelude::Read;
 use std::mem::transmute;
 
+/// Reads a path to an AST file, parses the file contents into
+/// the AST, and returns the root ScopeStmt
+pub fn read_ast(path: String) -> io::Result<ScopeStmt> {
+    let mut file = try!(File::open(path));
+    ScopeStmt::read(&mut file)
+}
+
+/// An expression
 pub enum Exp {
     Int(i32),
     Null,
@@ -20,6 +28,7 @@ pub enum Exp {
 }
 
 impl Exp {
+    /// Pretty prints an expression
     pub fn print(&self) {
         match *self {
             Exp::Int(i) => print!("{}", i),
@@ -100,6 +109,7 @@ impl Exp {
         }
     }
 
+    /// Reads an expression from a file
     pub fn read(f: &mut File) -> io::Result<Exp> {
         let tag = try!(read_int(f));
         match AstTag::from_i32(tag) {
@@ -215,12 +225,14 @@ impl Exp {
     }
 }
 
+/// A slot statment (used inside an object)
 pub enum SlotStmt {
     Var(SlotVar),
     Method(SlotMethod),
 }
 
 impl SlotStmt {
+    /// Pretty prints a slot statement
     pub fn print(&self) {
         match *self {
             SlotStmt::Var(ref vstmt) => {
@@ -242,6 +254,7 @@ impl SlotStmt {
         }
     }
 
+    /// Reads a slot statement from a file
     pub fn read(f: &mut File) -> io::Result<SlotStmt> {
         let tag = try!(read_int(f));
 
@@ -273,6 +286,7 @@ impl SlotStmt {
     }
 }
 
+/// A scope statement (anything inside a block)
 pub enum ScopeStmt {
     Var(ScopeVar),
     Fn(Box<ScopeFn>),
@@ -281,6 +295,7 @@ pub enum ScopeStmt {
 }
 
 impl ScopeStmt {
+    /// Pretty prints a scope statement
     pub fn print(&self) {
         match *self {
             ScopeStmt::Var(ref varstmt) => {
@@ -308,6 +323,7 @@ impl ScopeStmt {
         }
     }
 
+    /// Reads a scope statement from a file
     pub fn read(f: &mut File) -> io::Result<ScopeStmt> {
         let tag = try!(read_int(f));
 
