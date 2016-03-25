@@ -4,7 +4,6 @@ use std::ops::{Add, Mul, Sub, Div, Rem};
 
 impl Exp {
     pub fn eval(&self, genv: &mut EnvObj, env: &mut EnvObj) -> Obj {
-        // TODO(DarinM223): implement this
         match *self {
             Exp::Int(i) => Obj::Int(IntObj { value: i }),
             Exp::Null => Obj::Null,
@@ -29,11 +28,9 @@ impl Exp {
                         return obj.clone();
                     } else {
                         panic!("The object should contain a Var");
-                        unreachable!();
                     }
                 } else {
                     panic!("Object has to be an environment object");
-                    unreachable!();
                 }
             }
             Exp::SetSlot(ref setslot) => {
@@ -43,27 +40,119 @@ impl Exp {
                     env_obj.add(&setslot.name[..], Entry::Var(value));
                 } else {
                     panic!("Object has to be an environment object");
-                    unreachable!();
                 }
 
                 Obj::Null
             }
-            Exp::CallSlot(ref callslot) => {
-                let obj = callslot.exp.eval(genv, env);
-                // TODO(DarinM223): implement this
+            Exp::CallSlot(ref cs) => {
+                let mut obj = cs.exp.eval(genv, env);
                 match obj {
-                    Obj::Int(ref iexp) => Obj::Null,
-                    Obj::Array(ref arr) => Obj::Null,
-                    Obj::Env(ref env) => Obj::Null,
+                    Obj::Int(iexp) => {
+                        let other = match cs.args[0].eval(genv, env) {
+                            Obj::Int(i) => i,
+                            _ => panic!("Operand has to be an integer"),
+                        };
+
+                        Obj::Int(match &cs.name[..] {
+                            "add" => iexp + other,
+                            "sub" => iexp - other,
+                            "mul" => iexp * other,
+                            "div" => iexp / other,
+                            "mod" => iexp % other,
+                            "lt" => IntObj::from_bool(iexp < other),
+                            "gt" => IntObj::from_bool(iexp > other),
+                            "le" => IntObj::from_bool(iexp <= other),
+                            "ge" => IntObj::from_bool(iexp >= other),
+                            "eq" => IntObj::from_bool(iexp == other),
+                            _ => panic!("Invalid slot"),
+                        })
+                    }
+                    Obj::Array(ref mut arr) => {
+                        let (ge, e) = (genv, env);
+                        match &cs.name[..] {
+                            "length" => Obj::Int(arr.length()),
+                            "set" => arr.set(cs.args[0].eval(ge, e), cs.args[1].eval(ge, e)),
+                            "get" => {
+                                arr.get(cs.args[0].eval(ge, e))
+                                   .map(|obj| obj.clone())
+                                   .unwrap_or(Obj::Null)
+                            }
+                            _ => panic!("Invalid slot"),
+                        }
+                    }
+                    Obj::Env(ref mut ent) => {
+                        let ent_clone = ent.clone();
+                        if let Some(&mut Entry::Func(ref fun, ref args)) = ent.get(&cs.name[..]) {
+                            if cs.nargs as usize != args.len() {
+                                panic!("Args number does not match");
+                            }
+
+                            let mut new_env = EnvObj::new(None);
+                            for (i, arg) in cs.args.iter().enumerate() {
+                                new_env.add(&args[i][..], Entry::Var(arg.eval(genv, env)));
+                            }
+                            // FIXME(DarinM223): cloning might not work because if the this object
+                            // gets modified it won't change the original object
+                            new_env.add("this", Entry::Var(Obj::Env(ent_clone)));
+
+                            fun.eval(genv, &mut new_env)
+                        } else {
+                            panic!("Function is not found");
+                        }
+                    }
                     _ => unreachable!(),
                 }
             }
-            // TODO(DarinM223): implement rest of this
-            Exp::Call(ref call) => Obj::Null,
-            Exp::Set(ref set) => Obj::Null,
-            Exp::If(ref iexp) => Obj::Null,
-            Exp::While(ref wexp) => Obj::Null,
-            Exp::Ref(ref name) => Obj::Null,
+            Exp::Call(ref call) => {
+                let (fun, args) = match genv.get(&call.name[..]) {
+                    Some(&mut Entry::Func(ref fun, ref args)) => (fun.clone(), args.clone()),
+                    _ => panic!("Function is not found"),
+                };
+
+                if call.nargs as usize != args.len() {
+                    panic!("Args number does not match");
+                }
+
+                let mut new_env = EnvObj::new(None);
+                for (i, arg) in call.args.iter().enumerate() {
+                    new_env.add(&args[i][..], Entry::Var(arg.eval(genv, env)));
+                }
+
+                fun.eval(genv, &mut new_env)
+            }
+            Exp::Set(ref set) => {
+                let res = set.exp.eval(genv, env);
+                let ent = env.get(&set.name[..]).unwrap_or(genv.get(&set.name[..]).unwrap());
+
+                match *ent {
+                    Entry::Var(_) => *ent = Entry::Var(res),
+                    Entry::Func(_, _) => panic!("Setting value to function"),
+                };
+                Obj::Null
+            }
+            Exp::If(ref iexp) => {
+                let pred = iexp.pred.eval(genv, env);
+                match pred {
+                    Obj::Null => iexp.alt.eval(genv, env),
+                    _ => iexp.conseq.eval(genv, env),
+                }
+            }
+            Exp::While(ref wexp) => {
+                while let Obj::Int(_) = wexp.pred.eval(genv, env) {
+                    wexp.body.eval(genv, env);
+                }
+                Obj::Null
+            }
+            Exp::Ref(ref name) => {
+                let ent = env.get(name)
+                             .map(|e| e.clone())
+                             .unwrap_or(genv.get(name).map(|e| e.clone()).unwrap());
+
+                match ent {
+                    Entry::Var(obj) => obj,
+                    Entry::Func(_, _) => panic!("Should only ref to variable not function"),
+                }
+            }
         }
     }
 }
@@ -106,6 +195,15 @@ impl Obj {
 #[derive(Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub struct IntObj {
     value: i32,
+}
+
+impl IntObj {
+    pub fn from_bool(b: bool) -> IntObj {
+        match b {
+            true => IntObj { value: 1 },
+            false => IntObj { value: 0 },
+        }
+    }
 }
 
 impl Add<IntObj> for IntObj {
@@ -156,10 +254,9 @@ pub struct ArrayObj {
 
 impl ArrayObj {
     pub fn new(length: Obj, init: Obj) -> ArrayObj {
-        let len = if let Obj::Int(i) = length {
-            i.value
-        } else {
-            unreachable!();
+        let len = match length {
+            Obj::Int(i) => i.value,
+            _ => unreachable!(),
         };
 
         ArrayObj {
@@ -172,15 +269,24 @@ impl ArrayObj {
         self.length.clone()
     }
 
-    pub fn set(&mut self, i: IntObj, v: Obj) -> Obj {
-        if let Some(mut item) = self.arr.get_mut(i.value as usize) {
+    pub fn set(&mut self, i: Obj, v: Obj) -> Obj {
+        let index = match i {
+            Obj::Int(i) => i.value,
+            _ => unreachable!(),
+        };
+
+        if let Some(mut item) = self.arr.get_mut(index as usize) {
             *item = v;
         }
         Obj::Null
     }
 
-    pub fn get(&mut self, i: IntObj) -> Option<&mut Obj> {
-        self.arr.get_mut(i.value as usize)
+    pub fn get(&mut self, i: Obj) -> Option<&mut Obj> {
+        let index = match i {
+            Obj::Int(i) => i.value,
+            _ => unreachable!(),
+        };
+        self.arr.get_mut(index as usize)
     }
 }
 
