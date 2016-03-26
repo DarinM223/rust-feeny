@@ -2,8 +2,20 @@ use ast::{Exp, ScopeStmt};
 use std::collections::HashMap;
 use std::ops::{Add, Mul, Sub, Div, Rem};
 
+fn get_entry<'a>(name: &str, genv: &'a mut EnvObj, env: &'a mut Obj) -> &'a mut Entry {
+    let mut ent = None;
+    if let &mut Obj::Env(ref mut env) = env {
+        ent = env.get(name);
+    }
+    if let None = ent {
+        ent = genv.get(name);
+    }
+
+    ent.unwrap()
+}
+
 impl Exp {
-    pub fn eval(&self, genv: &mut EnvObj, env: &mut EnvObj) -> Obj {
+    pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> Obj {
         match *self {
             Exp::Int(i) => Obj::Int(IntObj { value: i }),
             Exp::Null => Obj::Null,
@@ -95,7 +107,7 @@ impl Exp {
                             // gets modified it won't change the original object
                             new_env.add("this", Entry::Var(Obj::Env(ent_clone)));
 
-                            fun.eval(genv, &mut new_env)
+                            fun.eval(genv, &mut Obj::Env(new_env))
                         } else {
                             panic!("Function is not found");
                         }
@@ -118,11 +130,11 @@ impl Exp {
                     new_env.add(&args[i][..], Entry::Var(arg.eval(genv, env)));
                 }
 
-                fun.eval(genv, &mut new_env)
+                fun.eval(genv, &mut Obj::Env(new_env))
             }
             Exp::Set(ref set) => {
                 let res = set.exp.eval(genv, env);
-                let ent = env.get(&set.name[..]).unwrap_or(genv.get(&set.name[..]).unwrap());
+                let ent = get_entry(&set.name[..], genv, env);
 
                 match *ent {
                     Entry::Var(_) => *ent = Entry::Var(res),
@@ -144,12 +156,10 @@ impl Exp {
                 Obj::Null
             }
             Exp::Ref(ref name) => {
-                let ent = env.get(name)
-                             .map(|e| e.clone())
-                             .unwrap_or(genv.get(name).map(|e| e.clone()).unwrap());
+                let ent = get_entry(name, genv, env);
 
-                match ent {
-                    Entry::Var(obj) => obj,
+                match *ent {
+                    Entry::Var(ref obj) => obj.clone(),
                     Entry::Func(_, _) => panic!("Should only ref to variable not function"),
                 }
             }
@@ -158,11 +168,11 @@ impl Exp {
 }
 
 impl ScopeStmt {
-    pub fn exec(&self, genv: &mut EnvObj, env: &mut EnvObj) {
+    pub fn exec(&self, genv: &mut EnvObj, env: &mut Obj) {
         // TODO(DarinM223): implement this
     }
 
-    pub fn eval(&self, genv: &mut EnvObj, env: &mut EnvObj) -> Obj {
+    pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> Obj {
         // TODO(DarinM223): implement this
         Obj::Null
     }
