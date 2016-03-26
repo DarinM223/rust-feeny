@@ -1,4 +1,4 @@
-use ast::{Exp, ScopeStmt};
+use ast::{Exp, ScopeStmt, SlotStmt};
 use std::collections::HashMap;
 use std::io;
 use std::ops::{Add, Mul, Sub, Div, Rem};
@@ -175,19 +175,57 @@ impl Exp {
     }
 }
 
-impl ScopeStmt {
-    pub fn exec(&self, genv: &mut EnvObj, env: &mut Obj) {
-        // TODO(DarinM223): implement this
-    }
+impl SlotStmt {
+    pub fn exec(&self, genv: &mut EnvObj, env: &mut Obj, obj: &mut Obj) -> io::Result<()> {
+        use std::io::ErrorKind::*;
 
-    pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> io::Result<Obj> {
-        // TODO(DarinM223): implement this
-        Ok(Obj::Null)
+        if let Obj::Env(ref mut env_obj) = *obj {
+            match *self {
+                SlotStmt::Var(ref var) => {
+                    env_obj.add(&var.name[..], Entry::Var(try!(var.exp.eval(genv, env))));
+                }
+                SlotStmt::Method(ref met) => {
+                    env_obj.add(&met.name[..],
+                                Entry::Func(met.body.clone(), met.args.clone()));
+                }
+            }
+
+            Ok(())
+        } else {
+            Err(Error::new(InvalidData, "Expected object to be an environment object"))
+        }
     }
 }
 
-pub fn interpret(stmt: ScopeStmt) {
-    // TODO(DarinM223): implement this
+impl ScopeStmt {
+    pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> io::Result<Obj> {
+        match *self {
+            ScopeStmt::Var(ref var) => {
+                let entry_obj = try!(var.exp.eval(genv, env));
+                if let Obj::Env(ref mut env_obj) = *env {
+                    env_obj.add(&var.name[..], Entry::Var(entry_obj));
+                } else {
+                    genv.add(&var.name[..], Entry::Var(entry_obj));
+                }
+                Ok(Obj::Null)
+            }
+            ScopeStmt::Fn(ref fun) => {
+                genv.add(&fun.name[..],
+                         Entry::Func(fun.body.clone(), fun.args.clone()));
+                Ok(Obj::Null)
+            }
+            ScopeStmt::Seq(ref seq) => {
+                try!(seq.a.eval(genv, env));
+                Ok(try!(seq.b.eval(genv, env)))
+            }
+            ScopeStmt::Exp(ref exp) => Ok(try!(exp.eval(genv, env))),
+        }
+    }
+}
+
+pub fn interpret(stmt: ScopeStmt) -> io::Result<()> {
+    try!(stmt.eval(&mut EnvObj::new(None), &mut Obj::Null));
+    Ok(())
 }
 
 /// An object used by the interpreter
