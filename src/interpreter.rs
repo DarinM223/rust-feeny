@@ -1,5 +1,6 @@
 use ast::{Exp, ScopeStmt};
 use std::collections::HashMap;
+use std::io;
 use std::ops::{Add, Mul, Sub, Div, Rem};
 
 fn get_entry<'a>(name: &str, genv: &'a mut EnvObj, env: &'a mut Obj) -> &'a mut Entry {
@@ -14,58 +15,62 @@ fn get_entry<'a>(name: &str, genv: &'a mut EnvObj, env: &'a mut Obj) -> &'a mut 
     ent.unwrap()
 }
 
+type Error = io::Error;
+
 impl Exp {
-    pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> Obj {
+    pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> io::Result<Obj> {
+        use std::io::ErrorKind::*;
+
         match *self {
-            Exp::Int(i) => Obj::Int(IntObj { value: i }),
-            Exp::Null => Obj::Null,
+            Exp::Int(i) => Ok(Obj::Int(IntObj { value: i })),
+            Exp::Null => Ok(Obj::Null),
             Exp::Printf(ref printf) => {
                 // TODO(DarinM223): implement this
-                Obj::Null
+                Ok(Obj::Null)
             }
             Exp::Array(ref array) => {
-                let length = array.length.eval(genv, env);
-                let init = array.init.eval(genv, env);
-                Obj::Array(Box::new(ArrayObj::new(length, init)))
+                let length = try!(array.length.eval(genv, env));
+                let init = try!(array.init.eval(genv, env));
+                Ok(Obj::Array(Box::new(ArrayObj::new(length, init))))
             }
             Exp::Object(ref obj) => {
-                let env_obj = EnvObj::new(Some(obj.parent.eval(genv, env)));
-                Obj::Env(env_obj)
+                let env_obj = EnvObj::new(Some(try!(obj.parent.eval(genv, env))));
+                Ok(Obj::Env(env_obj))
             }
             Exp::Slot(ref slot) => {
-                let obj = slot.exp.eval(genv, env);
+                let obj = try!(slot.exp.eval(genv, env));
                 if let Obj::Env(mut env_obj) = obj {
                     let entry = env_obj.get(&slot.name[..]);
                     if let Some(&mut Entry::Var(ref obj)) = entry {
-                        return obj.clone();
+                        Ok(obj.clone())
                     } else {
-                        panic!("The object should contain a Var");
+                        Err(Error::new(InvalidData, "The object should contain a Var"))
                     }
                 } else {
-                    panic!("Object has to be an environment object");
+                    Err(Error::new(InvalidData, "Object has to be an environment type"))
                 }
             }
             Exp::SetSlot(ref setslot) => {
-                let obj = setslot.exp.eval(genv, env);
-                let value = setslot.value.eval(genv, env);
+                let obj = try!(setslot.exp.eval(genv, env));
+                let value = try!(setslot.value.eval(genv, env));
                 if let Obj::Env(mut env_obj) = obj {
                     env_obj.add(&setslot.name[..], Entry::Var(value));
                 } else {
-                    panic!("Object has to be an environment object");
+                    return Err(Error::new(InvalidData, "Object has to be an environment object"));
                 }
 
-                Obj::Null
+                Ok(Obj::Null)
             }
             Exp::CallSlot(ref cs) => {
-                let mut obj = cs.exp.eval(genv, env);
+                let mut obj = try!(cs.exp.eval(genv, env));
                 match obj {
                     Obj::Int(iexp) => {
-                        let other = match cs.args[0].eval(genv, env) {
+                        let other = match try!(cs.args[0].eval(genv, env)) {
                             Obj::Int(i) => i,
                             _ => panic!("Operand has to be an integer"),
                         };
 
-                        Obj::Int(match &cs.name[..] {
+                        Ok(Obj::Int(match &cs.name[..] {
                             "add" => iexp + other,
                             "sub" => iexp - other,
                             "mul" => iexp * other,
@@ -77,31 +82,34 @@ impl Exp {
                             "ge" => IntObj::from_bool(iexp >= other),
                             "eq" => IntObj::from_bool(iexp == other),
                             _ => panic!("Invalid slot"),
-                        })
+                        }))
                     }
                     Obj::Array(ref mut arr) => {
                         let (ge, e) = (genv, env);
                         match &cs.name[..] {
-                            "length" => Obj::Int(arr.length()),
-                            "set" => arr.set(cs.args[0].eval(ge, e), cs.args[1].eval(ge, e)),
-                            "get" => {
-                                arr.get(cs.args[0].eval(ge, e))
-                                   .map(|obj| obj.clone())
-                                   .unwrap_or(Obj::Null)
+                            "length" => Ok(Obj::Int(arr.length())),
+                            "set" => {
+                                Ok(arr.set(try!(cs.args[0].eval(ge, e)),
+                                           try!(cs.args[1].eval(ge, e))))
                             }
-                            _ => panic!("Invalid slot"),
+                            "get" => {
+                                Ok(arr.get(try!(cs.args[0].eval(ge, e)))
+                                      .map(|obj| obj.clone())
+                                      .unwrap_or(Obj::Null))
+                            }
+                            _ => Err(Error::new(InvalidInput, "Invalid slot")),
                         }
                     }
                     Obj::Env(ref mut ent) => {
                         let ent_clone = ent.clone();
                         if let Some(&mut Entry::Func(ref fun, ref args)) = ent.get(&cs.name[..]) {
                             if cs.nargs as usize != args.len() {
-                                panic!("Args number does not match");
+                                return Err(Error::new(InvalidInput, "Args number doesn't match"));
                             }
 
                             let mut new_env = EnvObj::new(None);
                             for (i, arg) in cs.args.iter().enumerate() {
-                                new_env.add(&args[i][..], Entry::Var(arg.eval(genv, env)));
+                                new_env.add(&args[i][..], Entry::Var(try!(arg.eval(genv, env))));
                             }
                             // FIXME(DarinM223): cloning might not work because if the this object
                             // gets modified it won't change the original object
@@ -109,7 +117,7 @@ impl Exp {
 
                             fun.eval(genv, &mut Obj::Env(new_env))
                         } else {
-                            panic!("Function is not found");
+                            Err(Error::new(InvalidInput, "Function is not found"))
                         }
                     }
                     _ => unreachable!(),
@@ -118,49 +126,49 @@ impl Exp {
             Exp::Call(ref call) => {
                 let (fun, args) = match genv.get(&call.name[..]) {
                     Some(&mut Entry::Func(ref fun, ref args)) => (fun.clone(), args.clone()),
-                    _ => panic!("Function is not found"),
+                    _ => return Err(Error::new(InvalidInput, "Function not found")),
                 };
 
                 if call.nargs as usize != args.len() {
-                    panic!("Args number does not match");
+                    return Err(Error::new(InvalidData, "Args number does not match"));
                 }
 
                 let mut new_env = EnvObj::new(None);
                 for (i, arg) in call.args.iter().enumerate() {
-                    new_env.add(&args[i][..], Entry::Var(arg.eval(genv, env)));
+                    new_env.add(&args[i][..], Entry::Var(try!(arg.eval(genv, env))));
                 }
 
                 fun.eval(genv, &mut Obj::Env(new_env))
             }
             Exp::Set(ref set) => {
-                let res = set.exp.eval(genv, env);
+                let res = try!(set.exp.eval(genv, env));
                 let ent = get_entry(&set.name[..], genv, env);
 
                 match *ent {
                     Entry::Var(_) => *ent = Entry::Var(res),
-                    Entry::Func(_, _) => panic!("Setting value to function"),
+                    Entry::Func(_, _) => return Err(Error::new(InvalidData, "Setting func")),
                 };
-                Obj::Null
+                Ok(Obj::Null)
             }
             Exp::If(ref iexp) => {
-                let pred = iexp.pred.eval(genv, env);
+                let pred = try!(iexp.pred.eval(genv, env));
                 match pred {
                     Obj::Null => iexp.alt.eval(genv, env),
                     _ => iexp.conseq.eval(genv, env),
                 }
             }
             Exp::While(ref wexp) => {
-                while let Obj::Int(_) = wexp.pred.eval(genv, env) {
-                    wexp.body.eval(genv, env);
+                while let Obj::Int(_) = try!(wexp.pred.eval(genv, env)) {
+                    try!(wexp.body.eval(genv, env));
                 }
-                Obj::Null
+                Ok(Obj::Null)
             }
             Exp::Ref(ref name) => {
                 let ent = get_entry(name, genv, env);
 
                 match *ent {
-                    Entry::Var(ref obj) => obj.clone(),
-                    Entry::Func(_, _) => panic!("Should only ref to variable not function"),
+                    Entry::Var(ref obj) => Ok(obj.clone()),
+                    Entry::Func(_, _) => Err(Error::new(InvalidInput, "ref to function")),
                 }
             }
         }
@@ -172,9 +180,9 @@ impl ScopeStmt {
         // TODO(DarinM223): implement this
     }
 
-    pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> Obj {
+    pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> io::Result<Obj> {
         // TODO(DarinM223): implement this
-        Obj::Null
+        Ok(Obj::Null)
     }
 }
 
