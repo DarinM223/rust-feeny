@@ -25,7 +25,20 @@ impl Exp {
             Exp::Int(i) => Ok(Obj::Int(IntObj { value: i })),
             Exp::Null => Ok(Obj::Null),
             Exp::Printf(ref printf) => {
-                // TODO(DarinM223): implement this
+                let mut counter = 0;
+                for ch in printf.format.chars() {
+                    if ch == '~' {
+                        let res = try!(printf.exps[counter].eval(genv, env));
+                        if let Obj::Int(obj) = res {
+                            print!("{}", obj.value);
+                        } else {
+                            return Err(Error::new(InvalidInput, "Can only print Ints"));
+                        }
+                        counter += 1;
+                    } else {
+                        print!("{}", ch);
+                    }
+                }
                 Ok(Obj::Null)
             }
             Exp::Array(ref array) => {
