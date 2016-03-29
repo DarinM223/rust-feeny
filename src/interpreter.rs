@@ -25,6 +25,7 @@ impl Exp {
             Exp::Int(i) => Ok(Obj::Int(IntObj { value: i })),
             Exp::Null => Ok(Obj::Null),
             Exp::Printf(ref printf) => {
+                debug!("Printing!");
                 let mut counter = 0;
                 for ch in printf.format.chars() {
                     if ch == '~' {
@@ -51,6 +52,7 @@ impl Exp {
                 Ok(Obj::Env(env_obj))
             }
             Exp::Slot(ref slot) => {
+                debug!("Getting slot!");
                 let obj = try!(slot.exp.eval(genv, env));
                 if let Obj::Env(mut env_obj) = obj {
                     let entry = env_obj.get(&slot.name[..]);
@@ -64,6 +66,7 @@ impl Exp {
                 }
             }
             Exp::SetSlot(ref setslot) => {
+                debug!("Setting slot!");
                 let obj = try!(setslot.exp.eval(genv, env));
                 let value = try!(setslot.value.eval(genv, env));
                 if let Obj::Env(mut env_obj) = obj {
@@ -75,6 +78,7 @@ impl Exp {
                 Ok(Obj::Null)
             }
             Exp::CallSlot(ref cs) => {
+                debug!("Calling slot!");
                 let mut obj = try!(cs.exp.eval(genv, env));
                 match obj {
                     Obj::Int(iexp) => {
@@ -137,6 +141,7 @@ impl Exp {
                 }
             }
             Exp::Call(ref call) => {
+                debug!("Calling function!");
                 let (fun, args) = match genv.get(&call.name[..]) {
                     Some(&mut Entry::Func(ref fun, ref args)) => (fun.clone(), args.clone()),
                     _ => return Err(Error::new(InvalidInput, "Function not found")),
@@ -154,6 +159,7 @@ impl Exp {
                 fun.eval(genv, &mut Obj::Env(new_env))
             }
             Exp::Set(ref set) => {
+                debug!("Setting!");
                 let res = try!(set.exp.eval(genv, env));
                 let ent = get_entry(&set.name[..], genv, env);
 
@@ -214,6 +220,7 @@ impl ScopeStmt {
     pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> io::Result<Obj> {
         match *self {
             ScopeStmt::Var(ref var) => {
+                debug!("Var!");
                 let entry_obj = try!(var.exp.eval(genv, env));
                 if let Obj::Env(ref mut env_obj) = *env {
                     env_obj.add(&var.name[..], Entry::Var(entry_obj));
@@ -223,11 +230,13 @@ impl ScopeStmt {
                 Ok(Obj::Null)
             }
             ScopeStmt::Fn(ref fun) => {
+                debug!("Function: {}", &fun.name[..]);
                 genv.add(&fun.name[..],
                          Entry::Func(fun.body.clone(), fun.args.clone()));
                 Ok(Obj::Null)
             }
             ScopeStmt::Seq(ref seq) => {
+                debug!("Sequence!");
                 try!(seq.a.eval(genv, env));
                 Ok(try!(seq.b.eval(genv, env)))
             }
@@ -242,7 +251,7 @@ pub fn interpret(stmt: ScopeStmt) -> io::Result<()> {
 }
 
 /// An object used by the interpreter
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Obj {
     Null,
     Int(IntObj),
@@ -261,7 +270,7 @@ impl Obj {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct IntObj {
     value: i32,
 }
@@ -315,7 +324,7 @@ impl Rem<IntObj> for IntObj {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ArrayObj {
     length: IntObj,
     arr: Vec<Obj>,
@@ -360,13 +369,13 @@ impl ArrayObj {
 }
 
 /// Environment entries
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Entry {
     Var(Obj),
     Func(ScopeStmt, Vec<String>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EnvObj {
     parent: Option<Box<EnvObj>>,
     table: HashMap<String, Entry>,
@@ -386,11 +395,13 @@ impl EnvObj {
         }
     }
 
-    pub fn add(&mut self, name: &str, entry: Entry) {
+    fn add_parent(&mut self, name: &str, entry: &Entry) -> bool {
         let mut curr_env = Some(self);
+        let mut target_env = None;
 
         while let Some(env) = curr_env.take() {
             if let Some(_) = env.table.get_mut(name) {
+                target_env = Some(env);
                 break;
             }
 
@@ -401,8 +412,17 @@ impl EnvObj {
             }
         }
 
-        if let Some(curr_env) = curr_env {
-            curr_env.table.insert(name.to_owned(), entry);
+        if let Some(env) = target_env {
+            env.table.insert(name.to_owned(), entry.clone());
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn add(&mut self, name: &str, entry: Entry) {
+        if !self.add_parent(name, &entry) {
+            self.table.insert(name.to_owned(), entry);
         }
     }
 

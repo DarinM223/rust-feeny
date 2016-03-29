@@ -11,7 +11,7 @@ pub fn read_ast(path: String) -> io::Result<ScopeStmt> {
 }
 
 /// An expression
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Exp {
     Int(i32),
     Null,
@@ -227,7 +227,7 @@ impl Exp {
 }
 
 /// A slot statment (used inside an object)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum SlotStmt {
     Var(SlotVar),
     Method(SlotMethod),
@@ -289,7 +289,7 @@ impl SlotStmt {
 }
 
 /// A scope statement (anything inside a block)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ScopeStmt {
     Var(ScopeVar),
     Fn(Box<ScopeFn>),
@@ -365,14 +365,14 @@ impl ScopeStmt {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PrintfExp {
     pub format: String,
     pub nexps: i32,
     pub exps: Vec<Exp>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ArrayExp {
     /// The length of the array as an integer expression
     pub length: Exp,
@@ -380,14 +380,14 @@ pub struct ArrayExp {
     pub init: Exp,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ObjectExp {
     pub parent: Exp,
     pub nslots: i32,
     pub slots: Vec<SlotStmt>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SlotExp {
     /// The name of the slot
     pub name: String,
@@ -395,7 +395,7 @@ pub struct SlotExp {
     pub exp: Exp,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SetSlotExp {
     /// The name of the slot
     pub name: String,
@@ -405,7 +405,7 @@ pub struct SetSlotExp {
     pub value: Exp,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CallSlotExp {
     pub name: String,
     pub exp: Exp,
@@ -413,39 +413,39 @@ pub struct CallSlotExp {
     pub args: Vec<Exp>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CallExp {
     pub name: String,
     pub nargs: i32,
     pub args: Vec<Exp>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SetExp {
     pub name: String,
     pub exp: Exp,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IfExp {
     pub pred: Exp,
     pub conseq: ScopeStmt,
     pub alt: ScopeStmt,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WhileExp {
     pub pred: Exp,
     pub body: ScopeStmt,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SlotVar {
     pub name: String,
     pub exp: Exp,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SlotMethod {
     pub name: String,
     pub nargs: i32,
@@ -453,13 +453,13 @@ pub struct SlotMethod {
     pub body: ScopeStmt,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ScopeVar {
     pub name: String,
     pub exp: Exp,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ScopeFn {
     pub name: String,
     pub nargs: i32,
@@ -467,7 +467,7 @@ pub struct ScopeFn {
     pub body: ScopeStmt,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ScopeSeq {
     pub a: ScopeStmt,
     pub b: ScopeStmt,
