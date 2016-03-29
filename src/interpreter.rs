@@ -48,8 +48,12 @@ impl Exp {
                 Ok(Obj::Array(Box::new(ArrayObj::new(length, init))))
             }
             Exp::Object(ref obj) => {
-                let env_obj = EnvObj::new(Some(try!(obj.parent.eval(genv, env))));
-                Ok(Obj::Env(env_obj))
+                debug!("Object!");
+                let mut env_obj = Obj::Env(EnvObj::new(Some(try!(obj.parent.eval(genv, env)))));
+                for slot in &obj.slots {
+                    slot.exec(genv, env, &mut env_obj);
+                }
+                Ok(env_obj)
             }
             Exp::Slot(ref slot) => {
                 debug!("Getting slot!");
@@ -78,7 +82,7 @@ impl Exp {
                 Ok(Obj::Null)
             }
             Exp::CallSlot(ref cs) => {
-                debug!("Calling slot!");
+                debug!("Calling slot: {}", &cs.name[..]);
                 let mut obj = try!(cs.exp.eval(genv, env));
                 match obj {
                     Obj::Int(iexp) => {
@@ -119,6 +123,7 @@ impl Exp {
                     }
                     Obj::Env(ref mut ent) => {
                         let ent_clone = ent.clone();
+                        debug!("Entry: {:?}", ent);
                         if let Some(&mut Entry::Func(ref fun, ref args)) = ent.get(&cs.name[..]) {
                             if cs.nargs as usize != args.len() {
                                 return Err(Error::new(InvalidInput, "Args number doesn't match"));
@@ -141,7 +146,7 @@ impl Exp {
                 }
             }
             Exp::Call(ref call) => {
-                debug!("Calling function!");
+                debug!("Calling function: {}", &call.name[..]);
                 let (fun, args) = match genv.get(&call.name[..]) {
                     Some(&mut Entry::Func(ref fun, ref args)) => (fun.clone(), args.clone()),
                     _ => return Err(Error::new(InvalidInput, "Function not found")),
@@ -155,6 +160,7 @@ impl Exp {
                 for (i, arg) in call.args.iter().enumerate() {
                     new_env.add(&args[i][..], Entry::Var(try!(arg.eval(genv, env))));
                 }
+                debug!("New environment: {:?}", new_env);
 
                 fun.eval(genv, &mut Obj::Env(new_env))
             }
@@ -384,11 +390,13 @@ pub struct EnvObj {
 impl EnvObj {
     pub fn new(parent: Option<Obj>) -> EnvObj {
         EnvObj {
-            parent: parent.map(|env| {
+            parent: parent.and_then(|env| {
                 if let Obj::Env(env) = env {
-                    Box::new(env)
+                    Some(Box::new(env))
+                } else if let Obj::Null = env {
+                    None
                 } else {
-                    unreachable!()
+                    panic!("{:?} not an environment object or null", env);
                 }
             }),
             table: HashMap::new(),
@@ -421,6 +429,7 @@ impl EnvObj {
     }
 
     pub fn add(&mut self, name: &str, entry: Entry) {
+        debug!("Adding name: {}, entry: {:?}", name, entry);
         if !self.add_parent(name, &entry) {
             self.table.insert(name.to_owned(), entry);
         }
