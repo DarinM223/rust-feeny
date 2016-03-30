@@ -91,30 +91,29 @@ impl Exp {
                             _ => panic!("Operand has to be an integer"),
                         };
 
-                        Ok(Obj::Int(match &cs.name[..] {
-                            "add" => iexp + other,
-                            "sub" => iexp - other,
-                            "mul" => iexp * other,
-                            "div" => iexp / other,
-                            "mod" => iexp % other,
-                            "lt" => IntObj::from_bool(iexp < other),
-                            "gt" => IntObj::from_bool(iexp > other),
-                            "le" => IntObj::from_bool(iexp <= other),
-                            "ge" => IntObj::from_bool(iexp >= other),
-                            "eq" => IntObj::from_bool(iexp == other),
-                            _ => panic!("Invalid slot"),
-                        }))
+                        match &cs.name[..] {
+                            "add" => Ok(Obj::Int(iexp + other)),
+                            "sub" => Ok(Obj::Int(iexp - other)),
+                            "mul" => Ok(Obj::Int(iexp * other)),
+                            "div" => Ok(Obj::Int(iexp / other)),
+                            "mod" => Ok(Obj::Int(iexp % other)),
+                            "lt" => Ok(Obj::from_bool(iexp < other)),
+                            "gt" => Ok(Obj::from_bool(iexp > other)),
+                            "le" => Ok(Obj::from_bool(iexp <= other)),
+                            "ge" => Ok(Obj::from_bool(iexp >= other)),
+                            "eq" => Ok(Obj::from_bool(iexp == other)),
+                            _ => Err(Error::new(InvalidInput, "Invalid slot")),
+                        }
                     }
                     Obj::Array(ref mut arr) => {
-                        let (ge, e) = (genv, env);
                         match &cs.name[..] {
                             "length" => Ok(Obj::Int(arr.length())),
                             "set" => {
-                                Ok(arr.set(try!(cs.args[0].eval(ge, e)),
-                                           try!(cs.args[1].eval(ge, e))))
+                                Ok(arr.set(try!(cs.args[0].eval(genv, env)),
+                                           try!(cs.args[1].eval(genv, env))))
                             }
                             "get" => {
-                                Ok(arr.get(try!(cs.args[0].eval(ge, e)))
+                                Ok(arr.get(try!(cs.args[0].eval(genv, env)))
                                       .map(|obj| obj.clone())
                                       .unwrap_or(Obj::Null))
                             }
@@ -274,20 +273,18 @@ impl Obj {
             Obj::Env(_) => 3,
         }
     }
+
+    pub fn from_bool(b: bool) -> Obj {
+        match b {
+            true => Obj::Int(IntObj { value: 1 }),
+            false => Obj::Null,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct IntObj {
     value: i32,
-}
-
-impl IntObj {
-    pub fn from_bool(b: bool) -> IntObj {
-        match b {
-            true => IntObj { value: 1 },
-            false => IntObj { value: 0 },
-        }
-    }
 }
 
 impl Add<IntObj> for IntObj {
