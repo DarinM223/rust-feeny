@@ -256,7 +256,7 @@ pub fn interpret(stmt: ScopeStmt) -> io::Result<()> {
 }
 
 /// An object used by the interpreter
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Obj {
     Null,
     Int(IntObj),
@@ -327,7 +327,7 @@ impl Rem<IntObj> for IntObj {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ArrayObj {
     length: IntObj,
     arr: Vec<Obj>,
@@ -372,13 +372,13 @@ impl ArrayObj {
 }
 
 /// Environment entries
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Entry {
     Var(Obj),
     Func(ScopeStmt, Vec<String>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EnvObj {
     parent: Option<Box<EnvObj>>,
     table: HashMap<String, Entry>,
@@ -452,13 +452,47 @@ impl EnvObj {
 }
 
 #[cfg(test)]
-mod tests {
+mod test_int_obj {
     use super::*;
 
     #[test]
-    fn test_int_ord() {
+    fn test_boolean_ops() {
         assert!(IntObj { value: 2 } > IntObj { value: 1 });
         assert!(IntObj { value: 1 } < IntObj { value: 2 });
         assert!(IntObj { value: -1 } < IntObj { value: 0 });
+        assert!(IntObj { value: 1 } == IntObj { value: 1 });
+    }
+
+    #[test]
+    fn test_number_ops() {
+        assert_eq!(IntObj { value: 2 } + IntObj { value: 3 },
+                   IntObj { value: 5 });
+        assert_eq!(IntObj { value: 2 } - IntObj { value: 3 },
+                   IntObj { value: -1 });
+        assert_eq!(IntObj { value: 2 } * IntObj { value: 3 },
+                   IntObj { value: 6 });
+    }
+}
+
+#[cfg(test)]
+mod test_array_obj {
+    use super::*;
+
+    #[test]
+    fn test_init() {
+        let length = Obj::Int(IntObj { value: 3 });
+        let init = Obj::Int(IntObj { value: 69 });
+        let init_clone = init.clone();
+        assert_eq!(ArrayObj::new(length, init),
+                   ArrayObj {
+                       length: IntObj { value: 3 },
+                       arr: vec![init_clone; 3],
+                   });
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_init_wrong_param() {
+        ArrayObj::new(Obj::Null, Obj::Int(IntObj { value: 69 }));
     }
 }
