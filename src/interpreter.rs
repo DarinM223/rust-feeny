@@ -23,9 +23,7 @@ fn set_entry(name: &str, entry: &Entry, genv: &mut EnvObj, env: &mut Obj) -> io:
     use std::io::ErrorKind::*;
     let mut in_env = false;
     if let &mut Obj::Env(ref mut env) = env {
-        debug!("Borrow 15!");
         if env.borrow().get(name) != None {
-            debug!("Borrow 16!");
             env.borrow_mut().add(name, entry.clone());
             in_env = true;
         }
@@ -51,7 +49,6 @@ impl Exp {
             Exp::Int(i) => Ok(Obj::Int(IntObj { value: i })),
             Exp::Null => Ok(Obj::Null),
             Exp::Printf(ref printf) => {
-                debug!("Printing!");
                 let mut counter = 0;
                 for ch in printf.format.chars() {
                     if ch == '~' {
@@ -74,7 +71,6 @@ impl Exp {
                 Ok(Obj::Array(Rc::new(RefCell::new(ArrayObj::new(length, init)))))
             }
             Exp::Object(ref obj) => {
-                debug!("Object!");
                 let mut env_obj = Obj::Env(Rc::new(RefCell::new(EnvObj::new(Some(try!(obj.parent
                                                                            .eval(genv, env)))))));
                 for slot in &obj.slots {
@@ -83,10 +79,9 @@ impl Exp {
                 Ok(env_obj)
             }
             Exp::Slot(ref slot) => {
-                debug!("Getting slot!");
+                debug!("Getting slot: {}", &slot.name[..]);
                 let obj = try!(slot.exp.eval(genv, env));
                 if let Obj::Env(env_obj) = obj {
-                    debug!("Before borrow one!");
                     let entry = env_obj.borrow().get(&slot.name[..]);
                     if let Some(Entry::Var(obj)) = entry {
                         Ok(obj)
@@ -98,13 +93,11 @@ impl Exp {
                 }
             }
             Exp::SetSlot(ref setslot) => {
-                debug!("Setting slot!");
+                debug!("Setting slot: {}", &setslot.name[..]);
                 let obj = try!(setslot.exp.eval(genv, env));
                 let value = try!(setslot.value.eval(genv, env));
                 if let Obj::Env(env_obj) = obj {
-                    debug!("Before borrow two!");
                     env_obj.borrow_mut().add(&setslot.name[..], Entry::Var(value));
-                    debug!("After!");
                 } else {
                     return Err(Error::new(InvalidData, "Object has to be an environment object"));
                 }
@@ -139,13 +132,11 @@ impl Exp {
                         match &cs.name[..] {
                             "length" => Ok(Obj::Int(arr.borrow().length())),
                             "set" => {
-                                debug!("Borrow three!");
                                 let name = try!(cs.args[0].eval(genv, env));
                                 let param = try!(cs.args[1].eval(genv, env));
                                 Ok(arr.borrow_mut().set(name, param))
                             }
                             "get" => {
-                                debug!("Borrow four!");
                                 let name = try!(cs.args[0].eval(genv, env));
                                 Ok(arr.borrow().get(name).unwrap_or(Obj::Null))
                             }
@@ -153,7 +144,6 @@ impl Exp {
                         }
                     }
                     Obj::Env(ref mut ent) => {
-                        debug!("Borrow five!");
                         let entry: Option<Entry>;
 
                         {
@@ -169,8 +159,6 @@ impl Exp {
                             for (i, arg) in cs.args.iter().enumerate() {
                                 new_env.add(&args[i][..], Entry::Var(try!(arg.eval(genv, env))));
                             }
-                            // FIXME(DarinM223): cloning might not work because if the this object
-                            // gets modified it won't change the original object
                             new_env.add("this", Entry::Var(Obj::Env(ent.clone())));
 
                             fun.eval(genv, &mut Obj::Env(Rc::new(RefCell::new(new_env))))
@@ -196,12 +184,10 @@ impl Exp {
                 for (i, arg) in call.args.iter().enumerate() {
                     new_env.add(&args[i][..], Entry::Var(try!(arg.eval(genv, env))));
                 }
-                debug!("New environment: {:?}", new_env);
 
                 fun.eval(genv, &mut Obj::Env(Rc::new(RefCell::new(new_env))))
             }
             Exp::Set(ref set) => {
-                debug!("Setting!");
                 let res = try!(set.exp.eval(genv, env));
                 let ent = get_entry(&set.name[..], genv, env);
 
@@ -243,12 +229,10 @@ impl SlotStmt {
         if let Obj::Env(ref mut env_obj) = *obj {
             match *self {
                 SlotStmt::Var(ref var) => {
-                    debug!("Borrow 6!");
                     let var_exp = try!(var.exp.eval(genv, env));
                     env_obj.borrow_mut().add(&var.name[..], Entry::Var(var_exp));
                 }
                 SlotStmt::Method(ref met) => {
-                    debug!("Borrow 7!");
                     env_obj.borrow_mut().add(&met.name[..],
                                              Entry::Func(met.body.clone(), met.args.clone()));
                 }
@@ -265,10 +249,9 @@ impl ScopeStmt {
     pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> io::Result<Obj> {
         match *self {
             ScopeStmt::Var(ref var) => {
-                debug!("Var!");
+                debug!("Var: {}", &var.name[..]);
                 let entry_obj = try!(var.exp.eval(genv, env));
                 if let Obj::Env(ref mut env_obj) = *env {
-                    debug!("Borrow 8!");
                     env_obj.borrow_mut().add(&var.name[..], Entry::Var(entry_obj));
                 } else {
                     genv.add(&var.name[..], Entry::Var(entry_obj));
@@ -282,7 +265,6 @@ impl ScopeStmt {
                 Ok(Obj::Null)
             }
             ScopeStmt::Seq(ref seq) => {
-                debug!("Sequence!");
                 try!(seq.a.eval(genv, env));
                 Ok(try!(seq.b.eval(genv, env)))
             }
@@ -453,7 +435,6 @@ impl EnvObj {
         while let Some(env) = parent_env.take() {
             let mut has_target_env = false;
             {
-                debug!("Borrow 9!");
                 if env.borrow().table.get(name) != None {
                     has_target_env = true;
                 }
@@ -463,7 +444,6 @@ impl EnvObj {
                 break;
             }
 
-            debug!("Borrow 10!");
             if let Some(ref mut parent) = env.borrow_mut().parent {
                 parent_env = Some(parent.clone());
             } else {
@@ -472,7 +452,6 @@ impl EnvObj {
         }
 
         if let Some(ref mut env) = target_env {
-            debug!("Borrow 11!");
             env.borrow_mut().table.insert(name.to_owned(), entry.clone());
             true
         } else {
@@ -481,7 +460,6 @@ impl EnvObj {
     }
 
     pub fn add(&mut self, name: &str, entry: Entry) {
-        debug!("Adding name: {}, entry: {:?}", name, entry);
         if !self.add_parent(name, &entry) {
             self.table.insert(name.to_owned(), entry);
         }
@@ -495,12 +473,10 @@ impl EnvObj {
         let mut parent_env = self.parent.clone();
 
         while let Some(env) = parent_env.take() {
-            debug!("Borrow 12!");
             if let Some(data) = env.borrow().get(name) {
                 return Some(data.clone());
             }
 
-            debug!("Borrow 13!");
             if let Some(ref parent) = env.borrow().parent {
                 parent_env = Some(parent.clone());
             } else {
