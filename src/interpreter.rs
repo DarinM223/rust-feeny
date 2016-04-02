@@ -75,8 +75,7 @@ impl Exp {
             }
             Exp::Object(ref obj) => {
                 debug!("Object!");
-                let mut env_obj =
-                    Obj::Env(Rc::new(RefCell::new(EnvObj::new(Some(try!(obj.parent
+                let mut env_obj = Obj::Env(Rc::new(RefCell::new(EnvObj::new(Some(try!(obj.parent
                                                                            .eval(genv, env)))))));
                 for slot in &obj.slots {
                     slot.exec(genv, env, &mut env_obj);
@@ -156,11 +155,15 @@ impl Exp {
                         }
                     }
                     Obj::Env(ref mut ent) => {
-                        let ent_clone = ent.clone();
                         debug!("Entry: {:?}", ent);
                         debug!("Borrow five!");
-                        if let Some(Entry::Func(ref fun, ref args)) = ent.borrow()
-                                                                         .get(&cs.name[..]) {
+                        let entry: Option<Entry>;
+
+                        {
+                            entry = ent.borrow().get(&cs.name[..]).clone();
+                        }
+
+                        if let Some(Entry::Func(fun, args)) = entry {
                             if cs.nargs as usize != args.len() {
                                 return Err(Error::new(InvalidInput, "Args number doesn't match"));
                             }
@@ -171,7 +174,7 @@ impl Exp {
                             }
                             // FIXME(DarinM223): cloning might not work because if the this object
                             // gets modified it won't change the original object
-                            new_env.add("this", Entry::Var(Obj::Env(ent_clone)));
+                            new_env.add("this", Entry::Var(Obj::Env(ent.clone())));
 
                             fun.eval(genv, &mut Obj::Env(Rc::new(RefCell::new(new_env))))
                         } else {
