@@ -87,7 +87,6 @@ impl Exp {
                 let obj = try!(slot.exp.eval(genv, env));
                 if let Obj::Env(env_obj) = obj {
                     debug!("Before borrow one!");
-                    debug!("Environment object: {:?}", env_obj);
                     let entry = env_obj.borrow().get(&slot.name[..]);
                     if let Some(Entry::Var(obj)) = entry {
                         Ok(obj)
@@ -104,7 +103,6 @@ impl Exp {
                 let value = try!(setslot.value.eval(genv, env));
                 if let Obj::Env(env_obj) = obj {
                     debug!("Before borrow two!");
-                    debug!("Environment object: {:?}", env_obj);
                     env_obj.borrow_mut().add(&setslot.name[..], Entry::Var(value));
                     debug!("After!");
                 } else {
@@ -142,20 +140,19 @@ impl Exp {
                             "length" => Ok(Obj::Int(arr.borrow().length())),
                             "set" => {
                                 debug!("Borrow three!");
-                                Ok(arr.borrow_mut().set(try!(cs.args[0].eval(genv, env)),
-                                                        try!(cs.args[1].eval(genv, env))))
+                                let name = try!(cs.args[0].eval(genv, env));
+                                let param = try!(cs.args[1].eval(genv, env));
+                                Ok(arr.borrow_mut().set(name, param))
                             }
                             "get" => {
                                 debug!("Borrow four!");
-                                Ok(arr.borrow()
-                                      .get(try!(cs.args[0].eval(genv, env)))
-                                      .unwrap_or(Obj::Null))
+                                let name = try!(cs.args[0].eval(genv, env));
+                                Ok(arr.borrow().get(name).unwrap_or(Obj::Null))
                             }
                             _ => Err(Error::new(InvalidInput, "Invalid slot")),
                         }
                     }
                     Obj::Env(ref mut ent) => {
-                        debug!("Entry: {:?}", ent);
                         debug!("Borrow five!");
                         let entry: Option<Entry>;
 
