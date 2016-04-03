@@ -5,43 +5,16 @@ use std::io;
 use std::ops::{Add, Mul, Sub, Div, Rem};
 use std::rc::Rc;
 
-type Error = io::Error;
-
-fn get_entry<'a>(name: &str, genv: &'a mut EnvObj, env: &'a mut Obj) -> Entry {
-    let mut ent = None;
-    if let &mut Obj::Env(ref mut env) = env {
-        ent = env.borrow().get(name);
-    }
-    if ent == None {
-        ent = genv.get(name);
-    }
-
-    ent.unwrap()
-}
-
-fn set_entry(name: &str, entry: &Entry, genv: &mut EnvObj, env: &mut Obj) -> io::Result<()> {
-    use std::io::ErrorKind::*;
-    let mut in_env = false;
-    if let &mut Obj::Env(ref mut env) = env {
-        if env.borrow().get(name) != None {
-            env.borrow_mut().add(name, entry.clone());
-            in_env = true;
-        }
-    }
-
-    if !in_env {
-        if let Some(_) = genv.get(name) {
-            genv.add(name, entry.clone());
-        } else {
-            return Err(Error::new(InvalidData,
-                                  "Both the current and global environments don't have the entry"));
-        }
-    }
-
+/// Interprets an AST of a program
+pub fn interpret(stmt: ScopeStmt) -> io::Result<()> {
+    try!(stmt.eval(&mut EnvObj::new(None), &mut Obj::Null));
     Ok(())
 }
 
+type Error = io::Error;
+
 impl Exp {
+    /// Evaluates an expression given a local and global environment
     pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> io::Result<Obj> {
         use std::io::ErrorKind::*;
 
@@ -145,7 +118,6 @@ impl Exp {
                     }
                     Obj::Env(ref mut ent) => {
                         let entry: Option<Entry>;
-
                         {
                             entry = ent.borrow().get(&cs.name[..]).clone();
                         }
@@ -223,6 +195,8 @@ impl Exp {
 }
 
 impl SlotStmt {
+    /// Execute a slot statement given a local and global environment and
+    /// the object that contains the slot
     pub fn exec(&self, genv: &mut EnvObj, env: &mut Obj, obj: &mut Obj) -> io::Result<()> {
         use std::io::ErrorKind::*;
 
@@ -246,6 +220,7 @@ impl SlotStmt {
 }
 
 impl ScopeStmt {
+    /// Evaluates a scope statement given a local and global environment
     pub fn eval(&self, genv: &mut EnvObj, env: &mut Obj) -> io::Result<Obj> {
         match *self {
             ScopeStmt::Var(ref var) => {
@@ -273,11 +248,6 @@ impl ScopeStmt {
     }
 }
 
-pub fn interpret(stmt: ScopeStmt) -> io::Result<()> {
-    try!(stmt.eval(&mut EnvObj::new(None), &mut Obj::Null));
-    Ok(())
-}
-
 /// An object used by the interpreter
 #[derive(Clone, Debug, PartialEq)]
 pub enum Obj {
@@ -288,6 +258,7 @@ pub enum Obj {
 }
 
 impl Obj {
+    /// Returns the type of the object as an integer
     pub fn obj_type(&self) -> i32 {
         match *self {
             Obj::Null => 0,
@@ -297,6 +268,7 @@ impl Obj {
         }
     }
 
+    /// Creates an Integer object if true, otherwise creates a Null object
     pub fn from_bool(b: bool) -> Obj {
         match b {
             true => Obj::Int(IntObj { value: 1 }),
@@ -357,6 +329,8 @@ pub struct ArrayObj {
 }
 
 impl ArrayObj {
+    /// Creates a new array given the length and an initial value to
+    /// populate the array
     pub fn new(length: Obj, init: Obj) -> ArrayObj {
         let len = match length {
             Obj::Int(i) => i.value,
@@ -369,24 +343,27 @@ impl ArrayObj {
         }
     }
 
+    /// Returns the length of the array
     pub fn length(&self) -> IntObj {
         self.length.clone()
     }
 
-    pub fn set(&mut self, i: Obj, v: Obj) -> Obj {
-        let index = match i {
+    /// Sets a value in the array
+    pub fn set(&mut self, index: Obj, val: Obj) -> Obj {
+        let index = match index {
             Obj::Int(i) => i.value,
             _ => unreachable!(),
         };
 
         if let Some(mut item) = self.arr.get_mut(index as usize) {
-            *item = v;
+            *item = val;
         }
         Obj::Null
     }
 
-    pub fn get(&self, i: Obj) -> Option<Obj> {
-        let index = match i {
+    /// Retrieves a value from the array
+    pub fn get(&self, index: Obj) -> Option<Obj> {
+        let index = match index {
             Obj::Int(i) => i.value,
             _ => unreachable!(),
         };
@@ -397,7 +374,9 @@ impl ArrayObj {
 /// Environment entries
 #[derive(Clone, Debug, PartialEq)]
 pub enum Entry {
+    /// A variable entry
     Var(Obj),
+    /// A method entry
     Func(ScopeStmt, Vec<String>),
 }
 
@@ -408,6 +387,7 @@ pub struct EnvObj {
 }
 
 impl EnvObj {
+    /// Creates a new environment object given a parent object
     pub fn new(parent: Option<Obj>) -> EnvObj {
         EnvObj {
             parent: parent.and_then(|env| {
@@ -423,6 +403,40 @@ impl EnvObj {
         }
     }
 
+    /// Adds a new entry to the environment object
+    pub fn add(&mut self, name: &str, entry: Entry) {
+        if !self.add_parent(name, &entry) {
+            self.table.insert(name.to_owned(), entry);
+        }
+    }
+
+    /// Retrieves an entry from the environment object
+    pub fn get(&self, name: &str) -> Option<Entry> {
+        if let Some(data) = self.table.get(name) {
+            return Some(data.clone());
+        }
+
+        let mut parent_env = self.parent.clone();
+
+        while let Some(env) = parent_env.take() {
+            if let Some(data) = env.borrow().get(name) {
+                return Some(data.clone());
+            }
+
+            if let Some(ref parent) = env.borrow().parent {
+                parent_env = Some(parent.clone());
+            } else {
+                break;
+            }
+        }
+
+        None
+    }
+
+    /// Attempts to traverse up the parents looking for
+    /// the first parent that contains the name
+    /// and adds and sets the entry to that parent object.
+    /// Returns whether the attempt was successful
     fn add_parent(&mut self, name: &str, entry: &Entry) -> bool {
         if self.table.get_mut(name) != None {
             self.table.insert(name.to_owned(), entry.clone());
@@ -458,34 +472,46 @@ impl EnvObj {
             false
         }
     }
+}
 
-    pub fn add(&mut self, name: &str, entry: Entry) {
-        if !self.add_parent(name, &entry) {
-            self.table.insert(name.to_owned(), entry);
+/// Retrieves an entry from the environment.
+/// It first attempts to retrieve from the local environment and
+/// if that fails then it attempts to retrieve from the global environment
+fn get_entry<'a>(name: &str, genv: &'a mut EnvObj, env: &'a mut Obj) -> Entry {
+    let mut ent = None;
+    if let &mut Obj::Env(ref mut env) = env {
+        ent = env.borrow().get(name);
+    }
+    if ent == None {
+        ent = genv.get(name);
+    }
+
+    ent.unwrap()
+}
+
+/// Sets an entry in the environment.
+/// If the local environment already contains the entry, it sets the local environment,
+/// otherwise it sets the global environment
+fn set_entry(name: &str, entry: &Entry, genv: &mut EnvObj, env: &mut Obj) -> io::Result<()> {
+    use std::io::ErrorKind::*;
+    let mut in_env = false;
+    if let &mut Obj::Env(ref mut env) = env {
+        if env.borrow().get(name) != None {
+            env.borrow_mut().add(name, entry.clone());
+            in_env = true;
         }
     }
 
-    pub fn get(&self, name: &str) -> Option<Entry> {
-        if let Some(data) = self.table.get(name) {
-            return Some(data.clone());
+    if !in_env {
+        if let Some(_) = genv.get(name) {
+            genv.add(name, entry.clone());
+        } else {
+            return Err(Error::new(InvalidData,
+                                  "Both the current and global environments don't have the entry"));
         }
-
-        let mut parent_env = self.parent.clone();
-
-        while let Some(env) = parent_env.take() {
-            if let Some(data) = env.borrow().get(name) {
-                return Some(data.clone());
-            }
-
-            if let Some(ref parent) = env.borrow().parent {
-                parent_env = Some(parent.clone());
-            } else {
-                break;
-            }
-        }
-
-        None
     }
+
+    Ok(())
 }
 
 #[cfg(test)]

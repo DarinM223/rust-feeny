@@ -5,6 +5,7 @@ extern crate log;
 extern crate env_logger;
 
 pub mod ast;
+pub mod bytecode;
 pub mod interpreter;
 
 use std::env;
