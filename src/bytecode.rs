@@ -1,11 +1,49 @@
+use std::fs::File;
+use std::io;
+use std::io::prelude::Read;
+
 /// A bytecode value
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Int(i32),
+    Null,
     Str(String),
     Method(MethodValue),
     Slot(i32),
     Class(ClassValue),
+}
+
+impl Value {
+    pub fn print(&self) {
+        match *self {
+            Value::Int(i) => print!("Int({})", i),
+            Value::Null => print!("Null"),
+            Value::Str(ref s) => print!("String({:?})", s),
+            Value::Method(ref method) => {
+                print!("Method(#{}, nargs:{}, nlocals:{})",
+                       method.name,
+                       method.nargs,
+                       method.nlocals);
+
+                for inst in &method.code {
+                    println!("");
+                    inst.print();
+                }
+            }
+            Value::Class(ref class) => {
+                print!("Class(");
+                for (i, slot) in class.slots.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+
+                    print!("#{}", slot);
+                }
+                print!(")");
+            }
+            Value::Slot(i) => print!("Slot({})", i),
+        }
+    }
 }
 
 /// A bytecode instruction
@@ -14,6 +52,7 @@ pub enum Inst {
     Label(i32),
     Lit(i32),
     Printf(i32, i32),
+    Array,
     Object(i32),
     Slot(i32),
     SetSlot(i32),
@@ -25,11 +64,31 @@ pub enum Inst {
     GetGlobal(i32),
     Branch(i32),
     Goto(i32),
+    Return,
+    Drop,
 }
 
 impl Inst {
     pub fn print(&self) {
-        // TODO(DarinM223): implement this
+        match *self {
+            Inst::Label(i) => print!("Label #{}", i),
+            Inst::Lit(i) => print!("Lit #{}", i),
+            Inst::Printf(format, arity) => print!("Printf #{} {}", format, arity),
+            Inst::Array => print!("Array"),
+            Inst::Object(i) => print!("Object #{}", i),
+            Inst::Slot(i) => print!("Slot #{}", i),
+            Inst::SetSlot(i) => print!("Set-slot #{}", i),
+            Inst::CallSlot(name, arity) => print!("Call-slot #{} {}", name, arity),
+            Inst::Call(name, arity) => print!("Call #{} {}", name, arity),
+            Inst::SetLocal(i) => print!("Set-local {}", i),
+            Inst::GetLocal(i) => print!("Get-local {}", i),
+            Inst::SetGlobal(i) => print!("Set-global {}", i),
+            Inst::GetGlobal(i) => print!("Get-global {}", i),
+            Inst::Branch(i) => print!("Branch #{}", i),
+            Inst::Goto(i) => print!("Goto #{}", i),
+            Inst::Return => print!("Return"),
+            Inst::Drop => print!("Drop"),
+        }
     }
 }
 
@@ -51,7 +110,18 @@ impl Program {
     }
 
     pub fn print(&self) {
-        // TODO(DarinM223): implement this
+        print!("Constants: ");
+        for (i, value) in self.values.iter().enumerate() {
+            println!("");
+            print!("#{}: ", i);
+            value.print();
+        }
+        println!("");
+        println!("Globals: ");
+        for slot in &self.slots {
+            println!("#{}", slot);
+        }
+        println!("Entry: #{}", self.entry);
     }
 }
 
@@ -97,4 +167,37 @@ enum OpCode {
     Goto,
     Return,
     Drop,
+}
+
+fn read_byte(f: &mut File) -> io::Result<u8> {
+    f.bytes().next().unwrap()
+}
+
+fn read_short(f: &mut File) -> io::Result<i16> {
+    let b1 = try!(read_byte(f)) as i16;
+    let b2 = try!(read_byte(f)) as i16;
+
+    Ok(b1 + (b2 << 8))
+}
+
+fn read_int(f: &mut File) -> io::Result<i32> {
+    let b1 = try!(read_byte(f)) as i32;
+    let b2 = try!(read_byte(f)) as i32;
+    let b3 = try!(read_byte(f)) as i32;
+    let b4 = try!(read_byte(f)) as i32;
+
+    Ok(b1 + (b2 << 8) + (b3 << 16) + (b4 << 24))
+}
+
+fn read_string(f: &mut File) -> io::Result<String> {
+    let len = try!(read_int(f));
+    let mut buf = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        buf.push(try!(read_byte(f)));
+    }
+
+    String::from_utf8(buf).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput,
+                       "Error converting utf8 to string")
+    })
 }
