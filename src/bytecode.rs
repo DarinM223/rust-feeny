@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io;
 use std::io::prelude::Read;
+use std::mem::transmute;
 
 /// A bytecode value
 #[derive(Clone, Debug, PartialEq)]
@@ -9,25 +10,44 @@ pub enum Value {
     Null,
     Str(String),
     Method(MethodValue),
-    Slot(i32),
+    Slot(i16),
     Class(ClassValue),
 }
 
 impl Value {
+    pub fn read(f: &mut File) -> io::Result<Value> {
+        let tag = try!(read_byte(f));
+        Ok(match ValTag::from_u8(tag) {
+            ValTag::Int => Value::Int(try!(read_int(f))),
+            ValTag::Null => Value::Null,
+            ValTag::Str => Value::Str(try!(read_string(f))),
+            ValTag::Method => {
+                Value::Method(MethodValue {
+                    name: try!(read_short(f)),
+                    nargs: try!(read_short(f)),
+                    nlocals: try!(read_short(f)),
+                    code: try!(read_code(f)),
+                })
+            }
+            ValTag::Slot => Value::Slot(try!(read_short(f))),
+            ValTag::Class => Value::Class(ClassValue { slots: try!(read_slots(f)) }),
+        })
+    }
+
     pub fn print(&self) {
         match *self {
             Value::Int(i) => print!("Int({})", i),
             Value::Null => print!("Null"),
             Value::Str(ref s) => print!("String({:?})", s),
             Value::Method(ref method) => {
-                print!("Method(#{}, nargs:{}, nlocals:{})",
-                       method.name,
-                       method.nargs,
-                       method.nlocals);
+                println!("Method(#{}, nargs:{}, nlocals:{})",
+                         method.name,
+                         method.nargs,
+                         method.nlocals);
 
                 for inst in &method.code {
-                    println!("");
                     inst.print();
+                    println!("");
                 }
             }
             Value::Class(ref class) => {
@@ -49,26 +69,49 @@ impl Value {
 /// A bytecode instruction
 #[derive(Clone, Debug, PartialEq)]
 pub enum Inst {
-    Label(i32),
-    Lit(i32),
-    Printf(i32, i32),
+    Label(i16),
+    Lit(i16),
+    Printf(i16, u8),
     Array,
-    Object(i32),
-    Slot(i32),
-    SetSlot(i32),
-    CallSlot(i32, i32),
-    Call(i32, i32),
-    SetLocal(i32),
-    GetLocal(i32),
-    SetGlobal(i32),
-    GetGlobal(i32),
-    Branch(i32),
-    Goto(i32),
+    Object(i16),
+    Slot(i16),
+    SetSlot(i16),
+    CallSlot(i16, u8),
+    Call(i16, u8),
+    SetLocal(i16),
+    GetLocal(i16),
+    SetGlobal(i16),
+    GetGlobal(i16),
+    Branch(i16),
+    Goto(i16),
     Return,
     Drop,
 }
 
 impl Inst {
+    pub fn read(f: &mut File) -> io::Result<Inst> {
+        let op = try!(read_byte(f));
+        Ok(match OpCode::from_u8(op) {
+            OpCode::Label => Inst::Label(try!(read_short(f))),
+            OpCode::Lit => Inst::Lit(try!(read_short(f))),
+            OpCode::Printf => Inst::Printf(try!(read_short(f)), try!(read_byte(f))),
+            OpCode::Array => Inst::Array,
+            OpCode::Object => Inst::Object(try!(read_short(f))),
+            OpCode::Slot => Inst::Slot(try!(read_short(f))),
+            OpCode::SetSlot => Inst::SetSlot(try!(read_short(f))),
+            OpCode::CallSlot => Inst::CallSlot(try!(read_short(f)), try!(read_byte(f))),
+            OpCode::Call => Inst::CallSlot(try!(read_short(f)), try!(read_byte(f))),
+            OpCode::SetLocal => Inst::SetLocal(try!(read_short(f))),
+            OpCode::GetLocal => Inst::GetLocal(try!(read_short(f))),
+            OpCode::SetGlobal => Inst::SetGlobal(try!(read_short(f))),
+            OpCode::GetGlobal => Inst::GetGlobal(try!(read_short(f))),
+            OpCode::Branch => Inst::Branch(try!(read_short(f))),
+            OpCode::Goto => Inst::Goto(try!(read_short(f))),
+            OpCode::Return => Inst::Return,
+            OpCode::Drop => Inst::Drop,
+        })
+    }
+
     pub fn print(&self) {
         match *self {
             Inst::Label(i) => print!("Label #{}", i),
@@ -95,24 +138,27 @@ impl Inst {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {
     values: Vec<Value>,
-    slots: Vec<i32>,
-    entry: i32,
+    slots: Vec<i16>,
+    entry: i16,
 }
 
 impl Program {
-    pub fn load_bytecode(path: &str) -> Program {
-        // TODO(DarinM223): implement this
-        Program {
-            values: Vec::new(),
-            slots: Vec::new(),
-            entry: -1,
-        }
+    pub fn read(f: &mut File) -> io::Result<Program> {
+        Ok(Program {
+            values: try!(read_values(f)),
+            slots: try!(read_slots(f)),
+            entry: try!(read_short(f)),
+        })
+    }
+
+    pub fn load_bytecode(path: &str) -> io::Result<Program> {
+        let mut file = try!(File::open(path));
+        Program::read(&mut file)
     }
 
     pub fn print(&self) {
-        print!("Constants: ");
+        println!("Constants: ");
         for (i, value) in self.values.iter().enumerate() {
-            println!("");
             print!("#{}: ", i);
             value.print();
         }
@@ -127,18 +173,18 @@ impl Program {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MethodValue {
-    name: i32,
-    nargs: i32,
-    nlocals: i32,
+    name: i16,
+    nargs: i16,
+    nlocals: i16,
     code: Vec<Inst>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClassValue {
-    slots: Vec<i32>,
+    slots: Vec<i16>,
 }
 
-#[repr(i32)]
+#[repr(u8)]
 enum ValTag {
     Int = 0,
     Null,
@@ -148,7 +194,14 @@ enum ValTag {
     Class,
 }
 
-#[repr(i32)]
+impl ValTag {
+    fn from_u8(i: u8) -> ValTag {
+        assert!(i >= ValTag::Int as u8 && i <= ValTag::Class as u8);
+        unsafe { transmute(i) }
+    }
+}
+
+#[repr(u8)]
 enum OpCode {
     Label = 0,
     Lit,
@@ -167,6 +220,13 @@ enum OpCode {
     Goto,
     Return,
     Drop,
+}
+
+impl OpCode {
+    fn from_u8(i: u8) -> OpCode {
+        assert!(i >= OpCode::Label as u8 && i <= OpCode::Drop as u8);
+        unsafe { transmute(i) }
+    }
 }
 
 fn read_byte(f: &mut File) -> io::Result<u8> {
@@ -200,4 +260,31 @@ fn read_string(f: &mut File) -> io::Result<String> {
         io::Error::new(io::ErrorKind::InvalidInput,
                        "Error converting utf8 to string")
     })
+}
+
+fn read_code(f: &mut File) -> io::Result<Vec<Inst>> {
+    let n = try!(read_int(f));
+    let mut vec = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        vec.push(try!(Inst::read(f)));
+    }
+    Ok(vec)
+}
+
+fn read_slots(f: &mut File) -> io::Result<Vec<i16>> {
+    let n = try!(read_short(f));
+    let mut vec = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        vec.push(try!(read_short(f)));
+    }
+    Ok(vec)
+}
+
+fn read_values(f: &mut File) -> io::Result<Vec<Value>> {
+    let n = try!(read_short(f));
+    let mut vec = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        vec.push(try!(Value::read(f)));
+    }
+    Ok(vec)
 }
