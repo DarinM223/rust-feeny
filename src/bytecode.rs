@@ -3,6 +3,13 @@ use std::io;
 use std::io::prelude::Read;
 use std::mem::transmute;
 
+/// Reads a path to an bytecode file, parses the file contents into
+/// the bytecode structure, and returns the program
+pub fn load_bytecode(path: &str) -> io::Result<Program> {
+    let mut file = try!(File::open(path));
+    Program::read(&mut file)
+}
+
 /// A bytecode value
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -15,6 +22,7 @@ pub enum Value {
 }
 
 impl Value {
+    /// Reads a value from a file
     pub fn read(f: &mut File) -> io::Result<Value> {
         let tag = try!(read_byte(f));
         Ok(match ValTag::from_u8(tag) {
@@ -24,7 +32,7 @@ impl Value {
             ValTag::Method => {
                 Value::Method(MethodValue {
                     name: try!(read_short(f)),
-                    nargs: try!(read_short(f)),
+                    nargs: try!(read_byte(f)),
                     nlocals: try!(read_short(f)),
                     code: try!(read_code(f)),
                 })
@@ -34,6 +42,7 @@ impl Value {
         })
     }
 
+    /// Pretty prints a value
     pub fn print(&self) {
         match *self {
             Value::Int(i) => print!("Int({})", i),
@@ -89,6 +98,7 @@ pub enum Inst {
 }
 
 impl Inst {
+    /// Reads an instruction from a file
     pub fn read(f: &mut File) -> io::Result<Inst> {
         let op = try!(read_byte(f));
         Ok(match OpCode::from_u8(op) {
@@ -112,6 +122,7 @@ impl Inst {
         })
     }
 
+    /// Pretty prints an instruction
     pub fn print(&self) {
         match *self {
             Inst::Label(i) => print!("Label #{}", i),
@@ -143,6 +154,7 @@ pub struct Program {
 }
 
 impl Program {
+    /// Reads a program from a file
     pub fn read(f: &mut File) -> io::Result<Program> {
         Ok(Program {
             values: try!(read_values(f)),
@@ -151,22 +163,20 @@ impl Program {
         })
     }
 
-    pub fn load_bytecode(path: &str) -> io::Result<Program> {
-        let mut file = try!(File::open(path));
-        Program::read(&mut file)
-    }
-
+    /// Pretty prints a program
     pub fn print(&self) {
         println!("Constants: ");
         for (i, value) in self.values.iter().enumerate() {
             print!("#{}: ", i);
             value.print();
+            print!("    ");
         }
         println!("");
         println!("Globals: ");
         for slot in &self.slots {
-            println!("#{}", slot);
+            println!("#{}    ", slot);
         }
+        println!("");
         println!("Entry: #{}", self.entry);
     }
 }
@@ -174,7 +184,7 @@ impl Program {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MethodValue {
     name: i16,
-    nargs: i16,
+    nargs: u8,
     nlocals: i16,
     code: Vec<Inst>,
 }

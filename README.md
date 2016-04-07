@@ -17,11 +17,17 @@ build the project in release mode for better performance
 cargo build --release
 ```
 
-Then to run the interpreter, you have to specify an AST file.
+To run the ast interpreter, you have to specify an AST file.
 To print debug statments use RUST_LOG=debug otherwise use RUST_LOG=info
 ```
-RUST_LOG=info ./target/debug/feeny output/hello.ast
-RUST_LOG=debug ./target/debug/feeny output/hello.ast
+RUST_LOG=info ./target/debug/feeny ast output/hello.ast
+RUST_LOG=debug ./target/debug/feeny ast output/hello.ast
+```
+
+To run the bytecode interpreter, you have to specify a bytecode file.
+```
+RUST_LOG=info ./target/debug/feeny bc output/hello.bc
+RUST_LOG=debug ./target/debug/feeny bc output/hello.bc
 ```
 
 For release mode:
