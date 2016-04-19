@@ -148,9 +148,9 @@ impl Inst {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {
-    values: Vec<Value>,
-    slots: Vec<i16>,
-    entry: i16,
+    pub values: Vec<Value>,
+    pub slots: Vec<i16>,
+    pub entry: i16,
 }
 
 impl Program {
@@ -183,15 +183,15 @@ impl Program {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MethodValue {
-    name: i16,
-    nargs: u8,
-    nlocals: i16,
-    code: Vec<Inst>,
+    pub name: i16,
+    pub nargs: u8,
+    pub nlocals: i16,
+    pub code: Vec<Inst>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClassValue {
-    slots: Vec<i16>,
+    pub slots: Vec<i16>,
 }
 
 #[repr(u8)]
