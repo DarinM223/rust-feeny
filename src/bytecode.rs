@@ -78,23 +78,28 @@ impl Value {
 /// A bytecode instruction
 #[derive(Clone, Debug, PartialEq)]
 pub enum Inst {
-    Label(i16),
+    // Basic instructions
     Lit(i16),
-    Printf(i16, u8),
     Array,
-    Object(i16),
-    Slot(i16),
-    SetSlot(i16),
-    CallSlot(i16, u8),
-    Call(i16, u8),
+    Printf(i16, u8),
     SetLocal(i16),
     GetLocal(i16),
     SetGlobal(i16),
     GetGlobal(i16),
+    Drop,
+
+    // Object instructions
+    Object(i16),
+    GetSlot(i16),
+    SetSlot(i16),
+    CallSlot(i16, u8),
+
+    // Control flow instructions
+    Label(i16),
     Branch(i16),
     Goto(i16),
     Return,
-    Drop,
+    Call(i16, u8),
 }
 
 impl Inst {
@@ -107,7 +112,7 @@ impl Inst {
             OpCode::Printf => Inst::Printf(try!(read_short(f)), try!(read_byte(f))),
             OpCode::Array => Inst::Array,
             OpCode::Object => Inst::Object(try!(read_short(f))),
-            OpCode::Slot => Inst::Slot(try!(read_short(f))),
+            OpCode::GetSlot => Inst::GetSlot(try!(read_short(f))),
             OpCode::SetSlot => Inst::SetSlot(try!(read_short(f))),
             OpCode::CallSlot => Inst::CallSlot(try!(read_short(f)), try!(read_byte(f))),
             OpCode::Call => Inst::CallSlot(try!(read_short(f)), try!(read_byte(f))),
@@ -130,7 +135,7 @@ impl Inst {
             Inst::Printf(format, arity) => print!("Printf #{} {}", format, arity),
             Inst::Array => print!("Array"),
             Inst::Object(i) => print!("Object #{}", i),
-            Inst::Slot(i) => print!("Slot #{}", i),
+            Inst::GetSlot(i) => print!("Slot #{}", i),
             Inst::SetSlot(i) => print!("Set-slot #{}", i),
             Inst::CallSlot(name, arity) => print!("Call-slot #{} {}", name, arity),
             Inst::Call(name, arity) => print!("Call #{} {}", name, arity),
@@ -218,7 +223,7 @@ enum OpCode {
     Printf,
     Array,
     Object,
-    Slot,
+    GetSlot,
     SetSlot,
     CallSlot,
     Call,

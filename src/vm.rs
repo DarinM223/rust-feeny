@@ -1,21 +1,31 @@
 use bytecode::{Inst, MethodValue, Program, Value};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::mem;
+use std::rc::Rc;
+
+pub type Code = Rc<RefCell<Vec<Inst>>>;
 
 /// Interprets the bytecode structure
 pub fn interpret_bc(program: Program) -> io::Result<()> {
-    let mut vm = try!(VM::new(program));
+    let mut vm = try!(VM::new(&program));
 
-    // TODO(DarinM223): implement this
     while vm.pc < vm.code.len() as i32 {
         let inst = vm.code.get(vm.pc as usize).unwrap();
+
+        // TODO(DarinM223): implement this
         match *inst {
-            Inst::Lit(idx) => {}
+            Inst::Lit(idx) => {
+                // TODO(DarinM223): retrieve object from index in the constant pool
+                // and push into the operand stack
+                if let Some(&Value::Int(i)) = program.values.get(idx as usize) {
+                }
+            }
             Inst::Array => {}
             Inst::Printf(format, arity) => {}
             Inst::Object(class) => {}
-            Inst::Slot(name) => {}
+            Inst::GetSlot(name) => {}
             Inst::SetSlot(name) => {}
             Inst::CallSlot(name, arity) => {}
             Inst::SetLocal(idx) => {}
@@ -36,83 +46,27 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
     Ok(())
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Obj {
-    Int(i64),
-    Null,
-    Array(ArrayObj),
-    Object(EnvObj),
-    Method(MethodValue),
-}
-
-impl Obj {
-    pub fn obj_type(&self) -> i32 {
-        match *self {
-            Obj::Int(_) => 0,
-            Obj::Null => 1,
-            Obj::Array(_) => 2,
-            Obj::Object(_) => 3,
-            Obj::Method(_) => 4,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ArrayObj {
-    pub length: i64,
-    pub slots: Vec<Obj>,
-}
-
-impl ArrayObj {
-    pub fn new(length: Obj, init: Obj) -> ArrayObj {
-        let length = match length {
-            Obj::Int(len) => len,
-            _ => unreachable!(),
-        };
-
-        ArrayObj {
-            length: length,
-            slots: vec![init; length as usize],
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct EnvObj {
-    pub parent: Option<Box<Obj>>,
-    pub nslots: i32,
-    pub table: HashMap<String, Obj>,
-}
-
-impl EnvObj {
-    pub fn new(nslots: i32, parent: Option<Box<Obj>>) -> EnvObj {
-        EnvObj {
-            parent: parent,
-            nslots: nslots,
-            table: HashMap::with_capacity(nslots as usize),
-        }
-    }
-}
-
+/// Contains a reference counted pointer to the parent method's code
+/// and the program counter of the label
 #[derive(Clone, Debug)]
 struct LabelAddr {
-    code: Option<Vec<Inst>>,
+    code: Option<Code>,
     pc: i32,
 }
 
+/// The context in which a function is executing
 #[derive(Clone, Debug)]
 pub struct Frame {
-    slots: Vec<Obj>,
+    /// Arguments to the function + local variables
+    slots: Vec<Value>,
+    /// The address of the instruction that called the function
     ret_addr: LabelAddr,
+    /// The context of the parent
     parent: Option<Box<Frame>>,
 }
 
 impl Frame {
-    pub fn new(code: Option<Vec<Inst>>,
-               pc: i32,
-               num_slots: i32,
-               parent: Option<Box<Frame>>)
-               -> Frame {
+    pub fn new(code: Option<Code>, pc: i32, num_slots: i32, parent: Option<Box<Frame>>) -> Frame {
         let slots = Vec::with_capacity(num_slots as usize);
         let ret_addr = LabelAddr {
             code: code,
@@ -130,16 +84,21 @@ impl Frame {
 pub const VM_CAPACITY: usize = 13;
 
 pub struct VM {
-    global_vars: HashMap<String, Obj>,
+    /// Global variable and label name-to-value maps
+    global_vars: HashMap<String, Value>,
     labels: HashMap<String, LabelAddr>,
+
     code: Vec<Inst>,
+    /// Address of the next instruction to execute
     pc: i32,
-    operand: Vec<Obj>,
+    /// A stack for the temp results for evaluation
+    operand: Vec<Value>,
+    /// The context in which the current frame is executing
     local_frame: Frame,
 }
 
 impl VM {
-    pub fn new(mut p: Program) -> io::Result<VM> {
+    pub fn new(p: &Program) -> io::Result<VM> {
         use std::io::ErrorKind::*;
 
         let mut global_vars = HashMap::with_capacity(VM_CAPACITY);
@@ -147,46 +106,50 @@ impl VM {
         let local_frame;
         let code;
 
-        if let Some(&mut Value::Method(ref mut entry_func)) = p.values.get_mut(p.entry as usize) {
+        if let Some(&Value::Method(ref entry_func)) = p.values.get(p.entry as usize) {
             local_frame = Frame::new(None,
                                      0,
                                      (entry_func.nargs as i32) + (entry_func.nlocals as i32),
                                      None);
-            code = mem::replace(&mut entry_func.code, vec![]);
+            code = entry_func.code.clone();
         } else {
             return Err(io::Error::new(InvalidInput, "Entry function needs to be a method value!"));
         }
 
-        // Initialize global variables
-        for idx in p.slots {
-            let value = p.values.get(idx as usize).unwrap();
+        // Initialize global variable constant pool
+        for idx in &p.slots {
+            let value = p.values.get(*idx as usize).unwrap();
             match *value {
                 Value::Method(ref m) => {
+                    // retrieve the method name from the constant pool
                     let name = match p.values[m.name as usize] {
                         Value::Str(ref s) => s.clone(),
                         _ => return Err(io::Error::new(InvalidData, "Invalid object type")),
                     };
 
-                    let method_obj = Obj::Method(m.clone());
-                    global_vars.insert(name, method_obj);
+                    global_vars.insert(name, Value::Method(m.clone()));
                 }
                 Value::Slot(val) => {
+                    // retrieve the slot name from the constant pool
                     let name = match p.values[val as usize] {
                         Value::Str(ref s) => s.clone(),
                         _ => return Err(io::Error::new(InvalidData, "Invalid object type")),
                     };
 
-                    global_vars.insert(name, Obj::Null);
+                    global_vars.insert(name, Value::Null);
                 }
                 _ => return Err(io::Error::new(InvalidData, "Invalid value type")),
             }
         }
 
-        // Preprocess labels
+        // Store labels in map
         for val in &p.values {
             if let Value::Method(ref m) = *val {
+                let code = Rc::new(RefCell::new(m.code.clone()));
+
                 for (pc, inst) in m.code.iter().enumerate() {
                     if let Inst::Label(inst) = *inst {
+                        // retrieve the label name from the constant pool
                         let label_str = match p.values[inst as usize] {
                             Value::Str(ref s) => s.clone(),
                             _ => {
@@ -194,9 +157,15 @@ impl VM {
                                                           "Invalid object type for LABEL"))
                             }
                         };
+
+                        // insert into the map with the key as the label name
+                        // and the label containing the program counter at the label
+                        // and the code being the cloned code of the method
+                        // TODO(DarinM223): does all code fields have to point back to the same
+                        // data or can it just be cloned every time?
                         labels.insert(label_str,
                                       LabelAddr {
-                                          code: Some(m.code.clone()),
+                                          code: Some(code.clone()), // increment reference count
                                           pc: pc as i32,
                                       });
                     }
@@ -212,5 +181,13 @@ impl VM {
             operand: Vec::new(),
             local_frame: local_frame,
         })
+    }
+
+    pub fn push(&mut self, val: Value) {
+        self.operand.push(val);
+    }
+
+    pub fn pop(&mut self) -> Option<Value> {
+        self.operand.pop()
     }
 }
