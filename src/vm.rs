@@ -20,8 +20,6 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
         // TODO(DarinM223): implement this
         match *inst {
             Inst::Lit(idx) => {
-                // Retrieve object from index in the constant pool
-                // and push into the operand stack
                 match program.values.get(idx as usize) {
                     Some(&Value::Int(i)) => vm.operand.push(Obj::Int(i)),
                     Some(&Value::Null) => vm.operand.push(Obj::Null),
@@ -29,24 +27,79 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 }
             }
             Inst::Array => {
-                // Pop the initializing value from the operand stack,
-                // pop the the length of the array from the operand stack,
-                // then push the array onto the operand stack
                 if let (Some(init), Some(Obj::Int(len))) = (vm.operand.pop(), vm.operand.pop()) {
                     vm.operand.push(Obj::Array(vec![init; len as usize]));
                 } else {
                     return Err(io::Error::new(InvalidData, "Invalid length type for ARRAY"));
                 }
             }
-            Inst::Printf(format, arity) => {}
+            Inst::Printf(format, num) => {
+                let operand = &mut vm.operand;
+                let values: Vec<_> = (0..num).map(|_| operand.pop()).flat_map(|v| v).collect();
+                let format_str = match program.values.get(format as usize) {
+                    Some(&Value::Str(ref s)) => s.clone(),
+                    _ => return Err(io::Error::new(InvalidData, "Printf: Invalid type for format")),
+                };
+
+                // Print the values from last popped to first popped
+                let mut counter = 0;
+                for ch in format_str.chars() {
+                    if ch == '~' {
+                        if let Some(&Obj::Int(i)) = values.get(counter) {
+                            print!("{}", i);
+                        } else {
+                            return Err(io::Error::new(InvalidInput, "Printf: Error printing int"));
+                        }
+                        counter += 1;
+                    } else {
+                        print!("{}", ch);
+                    }
+                }
+
+                operand.push(Obj::Null);
+            }
             Inst::Object(class) => {}
             Inst::GetSlot(name) => {}
             Inst::SetSlot(name) => {}
             Inst::CallSlot(name, arity) => {}
-            Inst::SetLocal(idx) => {}
-            Inst::GetLocal(idx) => {}
-            Inst::SetGlobal(name) => {}
-            Inst::GetGlobal(name) => {}
+            Inst::SetLocal(idx) => {
+                let value = match vm.operand.last() {
+                    Some(v) => v.clone(),
+                    None => return Err(io::Error::new(InvalidData, "SetLocal: Op stack empty")),
+                };
+                vm.local_frame.slots[idx as usize] = value;
+            }
+            Inst::GetLocal(idx) => {
+                let value = match vm.local_frame.slots.get(idx as usize) {
+                    Some(v) => v.clone(),
+                    None => return Err(io::Error::new(InvalidInput, "GetLocal: Invalid index")),
+                };
+                vm.operand.push(value);
+            }
+            Inst::SetGlobal(name) => {
+                let name = match program.values.get(name as usize) {
+                    Some(&Value::Str(ref s)) => s.clone(),
+                    _ => return Err(io::Error::new(InvalidInput, "SetGlobal: Invalid index")),
+                };
+                let value = match vm.operand.last() {
+                    Some(v) => v.clone(),
+                    None => return Err(io::Error::new(InvalidData, "SetGlobal: Op Stack empty")),
+                };
+
+                vm.global_vars.insert(name, value);
+            }
+            Inst::GetGlobal(name) => {
+                let name = match program.values.get(name as usize) {
+                    Some(&Value::Str(ref s)) => s.clone(),
+                    _ => return Err(io::Error::new(InvalidInput, "GetGlobal: Invalid index")),
+                };
+                let value = match vm.global_vars.get(&name) {
+                    Some(v) => v.clone(),
+                    None => return Err(io::Error::new(InvalidData, "GetGlobal: Invalid name")),
+                };
+
+                vm.operand.push(value);
+            }
             Inst::Drop => {}
             Inst::Label(name) => {}
             Inst::Branch(name) => {}
