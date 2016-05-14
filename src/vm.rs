@@ -1,4 +1,5 @@
 use bytecode::{Inst, MethodValue, Program, Value};
+use interpreter::{EnvObj, EnvObjRef};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
@@ -9,6 +10,8 @@ pub type Code = Rc<RefCell<Vec<Inst>>>;
 
 /// Interprets the bytecode structure
 pub fn interpret_bc(program: Program) -> io::Result<()> {
+    use std::io::ErrorKind::*;
+
     let mut vm = try!(VM::new(&program));
 
     while vm.pc < vm.code.len() as i32 {
@@ -17,12 +20,24 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
         // TODO(DarinM223): implement this
         match *inst {
             Inst::Lit(idx) => {
-                // TODO(DarinM223): retrieve object from index in the constant pool
+                // Retrieve object from index in the constant pool
                 // and push into the operand stack
-                if let Some(&Value::Int(i)) = program.values.get(idx as usize) {
+                match program.values.get(idx as usize) {
+                    Some(&Value::Int(i)) => vm.operand.push(Obj::Int(i)),
+                    Some(&Value::Null) => vm.operand.push(Obj::Null),
+                    _ => return Err(io::Error::new(InvalidData, "Invalid object type for LIT")),
                 }
             }
-            Inst::Array => {}
+            Inst::Array => {
+                // Pop the initializing value from the operand stack,
+                // pop the the length of the array from the operand stack,
+                // then push the array onto the operand stack
+                if let (Some(init), Some(Obj::Int(len))) = (vm.operand.pop(), vm.operand.pop()) {
+                    vm.operand.push(Obj::Array(vec![init; len as usize]));
+                } else {
+                    return Err(io::Error::new(InvalidData, "Invalid length type for ARRAY"));
+                }
+            }
             Inst::Printf(format, arity) => {}
             Inst::Object(class) => {}
             Inst::GetSlot(name) => {}
@@ -46,6 +61,18 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
     Ok(())
 }
 
+/// An object that can be stored as a variable
+/// used in the global variable constant pool,
+/// the operand stack, and the frames
+#[derive(Clone, Debug, PartialEq)]
+pub enum Obj {
+    Int(i32),
+    Null,
+    Array(Vec<Obj>),
+    Method(MethodValue),
+    EnvObj(EnvObjRef<Obj>),
+}
+
 /// Contains a reference counted pointer to the parent method's code
 /// and the program counter of the label
 #[derive(Clone, Debug)]
@@ -58,7 +85,7 @@ struct LabelAddr {
 #[derive(Clone, Debug)]
 pub struct Frame {
     /// Arguments to the function + local variables
-    slots: Vec<Value>,
+    slots: Vec<Obj>,
     /// The address of the instruction that called the function
     ret_addr: LabelAddr,
     /// The context of the parent
@@ -85,14 +112,14 @@ pub const VM_CAPACITY: usize = 13;
 
 pub struct VM {
     /// Global variable and label name-to-value maps
-    global_vars: HashMap<String, Value>,
+    global_vars: HashMap<String, Obj>,
     labels: HashMap<String, LabelAddr>,
 
     code: Vec<Inst>,
     /// Address of the next instruction to execute
     pc: i32,
     /// A stack for the temp results for evaluation
-    operand: Vec<Value>,
+    operand: Vec<Obj>,
     /// The context in which the current frame is executing
     local_frame: Frame,
 }
@@ -127,7 +154,7 @@ impl VM {
                         _ => return Err(io::Error::new(InvalidData, "Invalid object type")),
                     };
 
-                    global_vars.insert(name, Value::Method(m.clone()));
+                    global_vars.insert(name, Obj::Method(m.clone()));
                 }
                 Value::Slot(val) => {
                     // retrieve the slot name from the constant pool
@@ -136,7 +163,7 @@ impl VM {
                         _ => return Err(io::Error::new(InvalidData, "Invalid object type")),
                     };
 
-                    global_vars.insert(name, Value::Null);
+                    global_vars.insert(name, Obj::Null);
                 }
                 _ => return Err(io::Error::new(InvalidData, "Invalid value type")),
             }
@@ -149,7 +176,7 @@ impl VM {
 
                 for (pc, inst) in m.code.iter().enumerate() {
                     if let Inst::Label(inst) = *inst {
-                        // retrieve the label name from the constant pool
+                        // Retrieve the label name from the constant pool
                         let label_str = match p.values[inst as usize] {
                             Value::Str(ref s) => s.clone(),
                             _ => {
@@ -158,7 +185,7 @@ impl VM {
                             }
                         };
 
-                        // insert into the map with the key as the label name
+                        // Insert into the map with the key as the label name
                         // and the label containing the program counter at the label
                         // and the code being the cloned code of the method
                         // TODO(DarinM223): does all code fields have to point back to the same
@@ -181,13 +208,5 @@ impl VM {
             operand: Vec::new(),
             local_frame: local_frame,
         })
-    }
-
-    pub fn push(&mut self, val: Value) {
-        self.operand.push(val);
-    }
-
-    pub fn pop(&mut self) -> Option<Value> {
-        self.operand.pop()
     }
 }
