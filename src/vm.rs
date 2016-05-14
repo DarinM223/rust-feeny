@@ -1,12 +1,23 @@
 use bytecode::{Inst, MethodValue, Program, Value};
-use interpreter::{EnvObj, EnvObjRef};
-use std::cell::RefCell;
+use interpreter::EnvObjRef;
 use std::collections::HashMap;
 use std::io;
-use std::mem;
-use std::rc::Rc;
 
-pub type Code = Rc<RefCell<Vec<Inst>>>;
+/// Similar to unwrap() but doesn't move value and resolves to a reference
+macro_rules! get_ref {
+    ($data:expr) => (match $data {
+        Some(ref val) => val,
+        None => panic!("Optional cannot be None"),
+    });
+}
+
+/// Similar to unwrap() but doesn't move value and resolves to a mutable reference
+macro_rules! get_mut_ref {
+    ($data:expr) => (match $data {
+        Some(ref mut val) => val,
+        None => panic!("Optional cannot be None"),
+    });
+}
 
 /// Interprets the bytecode structure
 pub fn interpret_bc(program: Program) -> io::Result<()> {
@@ -15,10 +26,8 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
     let mut vm = try!(VM::new(&program));
 
     while vm.pc < vm.code.len() as i32 {
-        let inst = vm.code.get(vm.pc as usize).unwrap();
-
         // TODO(DarinM223): implement this
-        match *inst {
+        match *vm.code.get(vm.pc as usize).unwrap() {
             Inst::Lit(idx) => {
                 match program.values.get(idx as usize) {
                     Some(&Value::Int(i)) => vm.operand.push(Obj::Int(i)),
@@ -34,29 +43,31 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 }
             }
             Inst::Printf(format, num) => {
-                let operand = &mut vm.operand;
-                let values: Vec<_> = (0..num).map(|_| operand.pop()).flat_map(|v| v).collect();
-                let format_str = match program.values.get(format as usize) {
-                    Some(&Value::Str(ref s)) => s.clone(),
-                    _ => return Err(io::Error::new(InvalidData, "Printf: Invalid type for format")),
-                };
-
-                // Print the values from last popped to first popped
-                let mut counter = 0;
-                for ch in format_str.chars() {
-                    if ch == '~' {
-                        if let Some(&Obj::Int(i)) = values.get(counter) {
-                            print!("{}", i);
-                        } else {
-                            return Err(io::Error::new(InvalidInput, "Printf: Error printing int"));
+                {
+                    let mut values = (0..num).map(|_| vm.operand.pop()).flat_map(|v| v).rev();
+                    let format_str = match program.values.get(format as usize) {
+                        Some(&Value::Str(ref s)) => s.clone(),
+                        _ => {
+                            return Err(io::Error::new(InvalidData,
+                                                      "Printf: Invalid type for format"))
                         }
-                        counter += 1;
-                    } else {
-                        print!("{}", ch);
+                    };
+
+                    // Print the values from last popped to first popped
+                    for ch in format_str.chars() {
+                        if ch == '~' {
+                            if let Some(Obj::Int(i)) = values.next() {
+                                print!("{}", i);
+                            } else {
+                                return Err(io::Error::new(InvalidInput,
+                                                          "Printf: Error printing int"));
+                            }
+                        } else {
+                            print!("{}", ch);
+                        }
                     }
                 }
-
-                operand.push(Obj::Null);
+                vm.operand.push(Obj::Null);
             }
             Inst::Object(class) => {}
             Inst::GetSlot(name) => {}
@@ -67,10 +78,10 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                     Some(v) => v.clone(),
                     None => return Err(io::Error::new(InvalidData, "SetLocal: Op stack empty")),
                 };
-                vm.local_frame.slots[idx as usize] = value;
+                get_mut_ref!(vm.local_frame).slots[idx as usize] = value;
             }
             Inst::GetLocal(idx) => {
-                let value = match vm.local_frame.slots.get(idx as usize) {
+                let value = match get_ref!(vm.local_frame).slots.get(idx as usize) {
                     Some(v) => v.clone(),
                     None => return Err(io::Error::new(InvalidInput, "GetLocal: Invalid index")),
                 };
@@ -101,10 +112,67 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 vm.operand.push(value);
             }
             Inst::Drop => {}
-            Inst::Label(name) => {}
-            Inst::Branch(name) => {}
-            Inst::Goto(name) => {}
-            Inst::Call(name, arity) => {}
+            Inst::Label(..) => {}
+            Inst::Branch(name) => {
+                let name = match program.values.get(name as usize) {
+                    Some(&Value::Str(ref s)) => s.clone(),
+                    _ => return Err(io::Error::new(InvalidInput, "Branch: Invalid index")),
+                };
+                let pc = match vm.labels.get(&name) {
+                    Some(ref label) => label.pc,
+                    _ => return Err(io::Error::new(InvalidData, "Branch: Invalid name")),
+                };
+
+                match vm.operand.pop() {
+                    Some(Obj::Null) => {
+                        return Err(io::Error::new(InvalidData, "Branch: Type is Null"))
+                    }
+                    Some(_) => vm.pc = pc,
+                    None => return Err(io::Error::new(InvalidInput, "Branch: Invalid index")),
+                }
+            }
+            Inst::Goto(name) => {
+                let name = match program.values.get(name as usize) {
+                    Some(&Value::Str(ref s)) => s.clone(),
+                    _ => return Err(io::Error::new(InvalidInput, "Goto: Invalid index")),
+                };
+                let pc = match vm.labels.get(&name) {
+                    Some(ref label) => label.pc,
+                    _ => return Err(io::Error::new(InvalidData, "Goto: Invalid name")),
+                };
+
+                vm.pc = pc;
+            }
+            Inst::Call(name, num) => {
+                let operand = &mut vm.operand;
+                let values: Vec<_> = (0..num)
+                                         .map(|_| operand.pop())
+                                         .flat_map(|v| v)
+                                         .rev()
+                                         .collect();
+                let name = match program.values.get(name as usize) {
+                    Some(&Value::Str(ref s)) => s.clone(),
+                    _ => return Err(io::Error::new(InvalidInput, "Call: Invalid index")),
+                };
+                let (code, pc) = match vm.labels.get(&name) {
+                    Some(ref label) => (label.code.clone(), label.pc),
+                    _ => return Err(io::Error::new(InvalidData, "Call: Invalid name")),
+                };
+
+                let code_subslice = vm.code.clone().split_off(vm.pc as usize);
+
+                let new_frame = Frame {
+                    slots: values,
+                    ret_addr: LabelAddr {
+                        code: Some(code_subslice),
+                        pc: vm.pc,
+                    },
+                    parent: Some(Box::new(vm.local_frame.take().unwrap())),
+                };
+                vm.local_frame = Some(new_frame);
+                vm.code = code.unwrap();
+                vm.pc = -1;
+            }
             Inst::Return => {}
         }
 
@@ -130,7 +198,7 @@ pub enum Obj {
 /// and the program counter of the label
 #[derive(Clone, Debug)]
 struct LabelAddr {
-    code: Option<Code>,
+    code: Option<Vec<Inst>>,
     pc: i32,
 }
 
@@ -146,7 +214,11 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub fn new(code: Option<Code>, pc: i32, num_slots: i32, parent: Option<Box<Frame>>) -> Frame {
+    pub fn new(code: Option<Vec<Inst>>,
+               pc: i32,
+               num_slots: i32,
+               parent: Option<Box<Frame>>)
+               -> Frame {
         let slots = Vec::with_capacity(num_slots as usize);
         let ret_addr = LabelAddr {
             code: code,
@@ -174,7 +246,7 @@ pub struct VM {
     /// A stack for the temp results for evaluation
     operand: Vec<Obj>,
     /// The context in which the current frame is executing
-    local_frame: Frame,
+    local_frame: Option<Frame>,
 }
 
 impl VM {
@@ -225,13 +297,11 @@ impl VM {
         // Store labels in map
         for val in &p.values {
             if let Value::Method(ref m) = *val {
-                let code = Rc::new(RefCell::new(m.code.clone()));
-
                 for (pc, inst) in m.code.iter().enumerate() {
                     if let Inst::Label(inst) = *inst {
                         // Retrieve the label name from the constant pool
-                        let label_str = match p.values[inst as usize] {
-                            Value::Str(ref s) => s.clone(),
+                        let label_str = match p.values.get(inst as usize) {
+                            Some(&Value::Str(ref s)) => s.clone(),
                             _ => {
                                 return Err(io::Error::new(InvalidData,
                                                           "Invalid object type for LABEL"))
@@ -245,7 +315,7 @@ impl VM {
                         // data or can it just be cloned every time?
                         labels.insert(label_str,
                                       LabelAddr {
-                                          code: Some(code.clone()), // increment reference count
+                                          code: Some(m.code.clone()), // increment reference count
                                           pc: pc as i32,
                                       });
                     }
@@ -259,7 +329,7 @@ impl VM {
             code: code,
             pc: 0,
             operand: Vec::new(),
-            local_frame: local_frame,
+            local_frame: Some(local_frame),
         })
     }
 }

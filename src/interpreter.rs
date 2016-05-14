@@ -47,7 +47,7 @@ impl Exp {
                 let mut env_obj = Obj::Env(Rc::new(RefCell::new(make_env_obj(Some(try!(obj.parent
                                                                            .eval(genv, env)))))));
                 for slot in &obj.slots {
-                    slot.exec(genv, env, &mut env_obj);
+                    let _ = slot.exec(genv, env, &mut env_obj);
                 }
                 Ok(env_obj)
             }
@@ -164,7 +164,9 @@ impl Exp {
                 let ent = get_entry(&set.name[..], genv, env);
 
                 match ent {
-                    Entry::Var(_) => set_entry(&set.name, &Entry::Var(res), genv, env),
+                    Entry::Var(_) => {
+                        let _ = set_entry(&set.name, &Entry::Var(res), genv, env);
+                    }
                     Entry::Func(_, _) => return Err(Error::new(InvalidData, "Setting func")),
                 };
                 Ok(Obj::Null)
