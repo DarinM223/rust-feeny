@@ -2,6 +2,7 @@ use bytecode::{Inst, MethodValue, Program, Value};
 use interpreter::EnvObjRef;
 use std::collections::HashMap;
 use std::io;
+use std::mem;
 
 /// Similar to unwrap() but doesn't move value and resolves to a reference
 macro_rules! get_ref {
@@ -111,7 +112,9 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
 
                 vm.operand.push(value);
             }
-            Inst::Drop => {}
+            Inst::Drop => {
+                let _ = vm.operand.pop();
+            }
             Inst::Label(..) => {}
             Inst::Branch(name) => {
                 let name = match program.values.get(name as usize) {
@@ -155,22 +158,19 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                     _ => return Err(io::Error::new(InvalidInput, "Call: Invalid index")),
                 };
                 let (code, pc) = match vm.labels.get(&name) {
-                    Some(ref label) => (label.code.clone(), label.pc),
+                    Some(ref label) => (label.code.clone().unwrap(), label.pc),
                     _ => return Err(io::Error::new(InvalidData, "Call: Invalid name")),
                 };
-
-                let code_subslice = vm.code.clone().split_off(vm.pc as usize);
 
                 let new_frame = Frame {
                     slots: values,
                     ret_addr: LabelAddr {
-                        code: Some(code_subslice),
+                        code: Some(mem::replace(&mut vm.code, code)),
                         pc: vm.pc,
                     },
                     parent: Some(Box::new(vm.local_frame.take().unwrap())),
                 };
                 vm.local_frame = Some(new_frame);
-                vm.code = code.unwrap();
                 vm.pc = -1;
             }
             Inst::Return => {}
