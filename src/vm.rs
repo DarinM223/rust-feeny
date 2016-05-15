@@ -50,7 +50,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                         Some(&Value::Str(ref s)) => s.clone(),
                         _ => {
                             return Err(io::Error::new(InvalidData,
-                                                      "Printf: Invalid type for format"))
+                                                      "Printf: Invalid type for format"));
                         }
                     };
 
@@ -84,7 +84,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             Inst::GetLocal(idx) => {
                 let value = match get_ref!(vm.local_frame).slots.get(idx as usize) {
                     Some(v) => v.clone(),
-                    None => return Err(io::Error::new(InvalidInput, "GetLocal: Invalid index")),
+                    _ => return Err(io::Error::new(InvalidInput, "GetLocal: Invalid index")),
                 };
                 vm.operand.push(value);
             }
@@ -148,22 +148,27 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             }
             Inst::Call(name, num) => {
                 let operand = &mut vm.operand;
-                let values: Vec<_> = (0..num)
-                                         .map(|_| operand.pop())
-                                         .flat_map(|v| v)
-                                         .rev()
-                                         .collect();
+                let values = (0..num).map(|_| operand.pop()).flat_map(|v| v).rev();
                 let name = match program.values.get(name as usize) {
                     Some(&Value::Str(ref s)) => s.clone(),
                     _ => return Err(io::Error::new(InvalidInput, "Call: Invalid index")),
                 };
-                let (code, pc) = match vm.labels.get(&name) {
-                    Some(ref label) => (label.code.clone().unwrap(), label.pc),
-                    _ => return Err(io::Error::new(InvalidData, "Call: Invalid name")),
+                let (code, nslots) = if let Some(&Obj::Method(ref m)) = vm.global_vars.get(&name) {
+                    (m.code.clone(), m.nargs as usize + m.nlocals as usize)
+                } else {
+                    return Err(io::Error::new(InvalidData, "Call: Invalid method type"));
                 };
 
+                let mut slots = vec![Obj::Null; nslots];
+                // Populate slots with the argument values from
+                // last popped to first popped from the operand stack
+                values.fold(0, |counter, value| {
+                    slots[counter] = value;
+                    counter + 1
+                });
+
                 let new_frame = Frame {
-                    slots: values,
+                    slots: slots,
                     ret_addr: LabelAddr {
                         code: Some(mem::replace(&mut vm.code, code)),
                         pc: vm.pc,
@@ -173,7 +178,20 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 vm.local_frame = Some(new_frame);
                 vm.pc = -1;
             }
-            Inst::Return => {}
+            Inst::Return => {
+                vm.local_frame.take().map(|mut frame| {
+                    if let Some(parent) = frame.parent.take() {
+                        vm.local_frame = Some(*parent);
+                    }
+                    vm.pc = frame.ret_addr.pc;
+                    vm.code = frame.ret_addr.code.take().unwrap();
+                });
+
+                // Return once all of the frames have been returned from
+                if vm.local_frame == None {
+                    break;
+                }
+            }
         }
 
         vm.pc += 1;
@@ -196,14 +214,14 @@ pub enum Obj {
 
 /// Contains a reference counted pointer to the parent method's code
 /// and the program counter of the label
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct LabelAddr {
     code: Option<Vec<Inst>>,
     pc: i32,
 }
 
 /// The context in which a function is executing
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
     /// Arguments to the function + local variables
     slots: Vec<Obj>,
