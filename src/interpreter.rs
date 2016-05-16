@@ -44,7 +44,7 @@ impl Exp {
             }
             Exp::Object(ref obj) => {
                 let mut env_obj = Obj::Env(Rc::new(RefCell::new(make_env_obj(Some(try!(obj.parent
-                                                                           .eval(genv, env)))))));
+                    .eval(genv, env)))))));
                 for slot in &obj.slots {
                     let _ = slot.exec(genv, env, &mut env_obj);
                 }
