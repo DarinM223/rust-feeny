@@ -73,20 +73,19 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             }
             Inst::Object(class) => {
                 if let Some(&Value::Class(ref classvalue)) = program.values.get(class as usize) {
-                    let slot_count = classvalue.slots.iter().fold(0, |count, slot| {
-                        if let Some(&Value::Slot(_)) = program.values.get(*slot as usize) {
-                            count + 1
-                        } else {
-                            count
-                        }
-                    });
-
                     let operand = &mut vm.operand;
-                    let args: Vec<_> = (0..slot_count)
-                                           .map(|_| operand.pop())
-                                           .flat_map(|v| v)
-                                           .rev()
-                                           .collect();
+                    // For all of the slots in the class value,
+                    // pop a value from the operand stack into a list
+                    // from lastly-popped to firstly-popped
+                    let args: Vec<Obj> =
+                        classvalue.slots
+                                  .iter()
+                                  .filter_map(|&slot| match program.values.get(slot as usize) {
+                                      Some(&Value::Slot(_)) => operand.pop(),
+                                      _ => None,
+                                  })
+                                  .rev()
+                                  .collect();
                     let mut args = args.into_iter();
                     let mut obj = if let Some(Obj::EnvObj(parent)) = operand.pop() {
                         EnvObj::new(Some(parent))
