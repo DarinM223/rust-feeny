@@ -1,8 +1,10 @@
 use bytecode::{Inst, MethodValue, Program, Value};
-use interpreter::EnvObjRef;
+use interpreter::{EnvObj, EnvObjRef};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::mem;
+use std::rc::Rc;
 
 /// Similar to unwrap() but doesn't move value and resolves to a reference
 macro_rules! get_ref {
@@ -22,6 +24,7 @@ macro_rules! get_mut_ref {
 
 /// Interprets the bytecode structure
 pub fn interpret_bc(program: Program) -> io::Result<()> {
+    use std::io::Error;
     use std::io::ErrorKind::*;
 
     let mut vm = try!(VM::new(&program));
@@ -33,35 +36,33 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 match program.values.get(idx as usize) {
                     Some(&Value::Int(i)) => vm.operand.push(Obj::Int(i)),
                     Some(&Value::Null) => vm.operand.push(Obj::Null),
-                    _ => return Err(io::Error::new(InvalidData, "Invalid object type for LIT")),
+                    _ => return Err(Error::new(InvalidData, "Invalid object type for LIT")),
                 }
             }
             Inst::Array => {
                 if let (Some(init), Some(Obj::Int(len))) = (vm.operand.pop(), vm.operand.pop()) {
                     vm.operand.push(Obj::Array(vec![init; len as usize]));
                 } else {
-                    return Err(io::Error::new(InvalidData, "Invalid length type for ARRAY"));
+                    return Err(Error::new(InvalidData, "Invalid length type for ARRAY"));
                 }
             }
             Inst::Printf(format, num) => {
                 {
-                    let mut values = (0..num).map(|_| vm.operand.pop()).flat_map(|v| v).rev();
+                    let mut args = (0..num).map(|_| vm.operand.pop()).flat_map(|v| v).rev();
                     let format_str = match program.values.get(format as usize) {
                         Some(&Value::Str(ref s)) => s.clone(),
                         _ => {
-                            return Err(io::Error::new(InvalidData,
-                                                      "Printf: Invalid type for format"));
+                            return Err(Error::new(InvalidData, "Printf: Invalid type for format"));
                         }
                     };
 
                     // Print the values from last popped to first popped
                     for ch in format_str.chars() {
                         if ch == '~' {
-                            if let Some(Obj::Int(i)) = values.next() {
+                            if let Some(Obj::Int(i)) = args.next() {
                                 print!("{}", i);
                             } else {
-                                return Err(io::Error::new(InvalidInput,
-                                                          "Printf: Error printing int"));
+                                return Err(Error::new(InvalidInput, "Printf: Error printing int"));
                             }
                         } else {
                             print!("{}", ch);
@@ -70,32 +71,85 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 }
                 vm.operand.push(Obj::Null);
             }
-            Inst::Object(class) => {}
+            Inst::Object(class) => {
+                if let Some(&Value::Class(ref classvalue)) = program.values.get(class as usize) {
+                    let slot_count = classvalue.slots.iter().fold(0, |count, slot| {
+                        if let Some(&Value::Slot(_)) = program.values.get(*slot as usize) {
+                            count + 1
+                        } else {
+                            count
+                        }
+                    });
+
+                    let operand = &mut vm.operand;
+                    let args: Vec<_> = (0..slot_count)
+                                           .map(|_| operand.pop())
+                                           .flat_map(|v| v)
+                                           .rev()
+                                           .collect();
+                    let mut args = args.into_iter();
+                    let mut obj = if let Some(Obj::EnvObj(parent)) = operand.pop() {
+                        EnvObj::new(Some(parent))
+                    } else {
+                        return Err(Error::new(InvalidData, "Object: Parent not object type"));
+                    };
+
+                    for slot in &classvalue.slots {
+                        match program.values.get(*slot as usize) {
+                            Some(&Value::Method(ref m)) => {
+                                let name = match program.values.get(m.name as usize) {
+                                    Some(&Value::Str(ref s)) => s.clone(),
+                                    _ => {
+                                        return Err(Error::new(InvalidData, "Object: Inval str"));
+                                    }
+                                };
+
+                                obj.add(&name[..], Obj::Method(m.clone()));
+                            }
+                            Some(&Value::Slot(name)) => {
+                                let name = match program.values.get(name as usize) {
+                                    Some(&Value::Str(ref s)) => s.clone(),
+                                    _ => {
+                                        return Err(Error::new(InvalidData, "Object: Inval str"));
+                                    }
+                                };
+
+                                obj.add(&name[..], args.next().unwrap());
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    operand.push(Obj::EnvObj(Rc::new(RefCell::new(obj))));
+                } else {
+                    return Err(Error::new(InvalidInput, "Object: Invalid index"));
+                }
+            }
             Inst::GetSlot(name) => {}
             Inst::SetSlot(name) => {}
             Inst::CallSlot(name, arity) => {}
             Inst::SetLocal(idx) => {
                 let value = match vm.operand.last() {
                     Some(v) => v.clone(),
-                    None => return Err(io::Error::new(InvalidData, "SetLocal: Op stack empty")),
+                    None => return Err(Error::new(InvalidData, "SetLocal: Op stack empty")),
                 };
                 get_mut_ref!(vm.local_frame).slots[idx as usize] = value;
             }
             Inst::GetLocal(idx) => {
                 let value = match get_ref!(vm.local_frame).slots.get(idx as usize) {
                     Some(v) => v.clone(),
-                    _ => return Err(io::Error::new(InvalidInput, "GetLocal: Invalid index")),
+                    _ => return Err(Error::new(InvalidInput, "GetLocal: Invalid index")),
                 };
                 vm.operand.push(value);
             }
             Inst::SetGlobal(name) => {
                 let name = match program.values.get(name as usize) {
                     Some(&Value::Str(ref s)) => s.clone(),
-                    _ => return Err(io::Error::new(InvalidInput, "SetGlobal: Invalid index")),
+                    _ => return Err(Error::new(InvalidInput, "SetGlobal: Invalid index")),
                 };
                 let value = match vm.operand.last() {
                     Some(v) => v.clone(),
-                    None => return Err(io::Error::new(InvalidData, "SetGlobal: Op Stack empty")),
+                    None => return Err(Error::new(InvalidData, "SetGlobal: Op Stack empty")),
                 };
 
                 vm.global_vars.insert(name, value);
@@ -103,11 +157,11 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             Inst::GetGlobal(name) => {
                 let name = match program.values.get(name as usize) {
                     Some(&Value::Str(ref s)) => s.clone(),
-                    _ => return Err(io::Error::new(InvalidInput, "GetGlobal: Invalid index")),
+                    _ => return Err(Error::new(InvalidInput, "GetGlobal: Invalid index")),
                 };
                 let value = match vm.global_vars.get(&name) {
                     Some(v) => v.clone(),
-                    None => return Err(io::Error::new(InvalidData, "GetGlobal: Invalid name")),
+                    None => return Err(Error::new(InvalidData, "GetGlobal: Invalid name")),
                 };
 
                 vm.operand.push(value);
@@ -119,51 +173,49 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             Inst::Branch(name) => {
                 let name = match program.values.get(name as usize) {
                     Some(&Value::Str(ref s)) => s.clone(),
-                    _ => return Err(io::Error::new(InvalidInput, "Branch: Invalid index")),
+                    _ => return Err(Error::new(InvalidInput, "Branch: Invalid index")),
                 };
                 let pc = match vm.labels.get(&name) {
                     Some(ref label) => label.pc,
-                    _ => return Err(io::Error::new(InvalidData, "Branch: Invalid name")),
+                    _ => return Err(Error::new(InvalidData, "Branch: Invalid name")),
                 };
 
                 match vm.operand.pop() {
-                    Some(Obj::Null) => {
-                        return Err(io::Error::new(InvalidData, "Branch: Type is Null"))
-                    }
+                    Some(Obj::Null) => return Err(Error::new(InvalidData, "Branch: Type is Null")),
                     Some(_) => vm.pc = pc,
-                    None => return Err(io::Error::new(InvalidInput, "Branch: Invalid index")),
+                    None => return Err(Error::new(InvalidInput, "Branch: Invalid index")),
                 }
             }
             Inst::Goto(name) => {
                 let name = match program.values.get(name as usize) {
                     Some(&Value::Str(ref s)) => s.clone(),
-                    _ => return Err(io::Error::new(InvalidInput, "Goto: Invalid index")),
+                    _ => return Err(Error::new(InvalidInput, "Goto: Invalid index")),
                 };
                 let pc = match vm.labels.get(&name) {
                     Some(ref label) => label.pc,
-                    _ => return Err(io::Error::new(InvalidData, "Goto: Invalid name")),
+                    _ => return Err(Error::new(InvalidData, "Goto: Invalid name")),
                 };
 
                 vm.pc = pc;
             }
             Inst::Call(name, num) => {
                 let operand = &mut vm.operand;
-                let values = (0..num).map(|_| operand.pop()).flat_map(|v| v).rev();
+                let args = (0..num).map(|_| operand.pop()).flat_map(|v| v).rev();
                 let name = match program.values.get(name as usize) {
                     Some(&Value::Str(ref s)) => s.clone(),
-                    _ => return Err(io::Error::new(InvalidInput, "Call: Invalid index")),
+                    _ => return Err(Error::new(InvalidInput, "Call: Invalid index")),
                 };
                 let (code, nslots) = if let Some(&Obj::Method(ref m)) = vm.global_vars.get(&name) {
                     (m.code.clone(), m.nargs as usize + m.nlocals as usize)
                 } else {
-                    return Err(io::Error::new(InvalidData, "Call: Invalid method type"));
+                    return Err(Error::new(InvalidData, "Call: Invalid method type"));
                 };
 
                 let mut slots = vec![Obj::Null; nslots];
                 // Populate slots with the argument values from
                 // last popped to first popped from the operand stack
-                values.fold(0, |counter, value| {
-                    slots[counter] = value;
+                args.fold(0, |counter, arg| {
+                    slots[counter] = arg;
                     counter + 1
                 });
 
@@ -292,8 +344,8 @@ impl VM {
             match *value {
                 Value::Method(ref m) => {
                     // retrieve the method name from the constant pool
-                    let name = match p.values[m.name as usize] {
-                        Value::Str(ref s) => s.clone(),
+                    let name = match p.values.get(m.name as usize) {
+                        Some(&Value::Str(ref s)) => s.clone(),
                         _ => return Err(io::Error::new(InvalidData, "Invalid object type")),
                     };
 
@@ -301,8 +353,8 @@ impl VM {
                 }
                 Value::Slot(val) => {
                     // retrieve the slot name from the constant pool
-                    let name = match p.values[val as usize] {
-                        Value::Str(ref s) => s.clone(),
+                    let name = match p.values.get(val as usize) {
+                        Some(&Value::Str(ref s)) => s.clone(),
                         _ => return Err(io::Error::new(InvalidData, "Invalid object type")),
                     };
 
@@ -329,11 +381,9 @@ impl VM {
                         // Insert into the map with the key as the label name
                         // and the label containing the program counter at the label
                         // and the code being the cloned code of the method
-                        // TODO(DarinM223): does all code fields have to point back to the same
-                        // data or can it just be cloned every time?
                         labels.insert(label_str,
                                       LabelAddr {
-                                          code: Some(m.code.clone()), // increment reference count
+                                          code: Some(m.code.clone()),
                                           pc: pc as i32,
                                       });
                     }
