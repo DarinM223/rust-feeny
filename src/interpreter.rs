@@ -11,11 +11,10 @@ pub fn interpret(stmt: ScopeStmt) -> io::Result<()> {
     Ok(())
 }
 
-type Error = io::Error;
-
 impl Exp {
     /// Evaluates an expression given a local and global environment
     pub fn eval(&self, genv: &mut EnvObj<Entry>, env: &mut Obj) -> io::Result<Obj> {
+        use std::io::Error;
         use std::io::ErrorKind::*;
 
         match *self {
@@ -200,6 +199,7 @@ impl SlotStmt {
     /// Execute a slot statement given a local and global environment and
     /// the object that contains the slot
     pub fn exec(&self, genv: &mut EnvObj<Entry>, env: &mut Obj, obj: &mut Obj) -> io::Result<()> {
+        use std::io::Error;
         use std::io::ErrorKind::*;
 
         if let Obj::Env(ref mut env_obj) = *obj {
@@ -497,6 +497,7 @@ fn get_entry<'a>(name: &str, genv: &'a mut EnvObj<Entry>, env: &'a mut Obj) -> E
 /// If the local environment already contains the entry, it sets the local environment,
 /// otherwise it sets the global environment
 fn set_entry(name: &str, entry: &Entry, genv: &mut EnvObj<Entry>, env: &mut Obj) -> io::Result<()> {
+    use std::io::Error;
     use std::io::ErrorKind::*;
     let mut in_env = false;
     if let &mut Obj::Env(ref mut env) = env {

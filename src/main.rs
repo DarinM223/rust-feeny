@@ -32,6 +32,13 @@ fn main() {
             "bc" => {
                 let program = bytecode::load_bytecode(&path[..]).unwrap();
                 program.print();
+
+                println!("");
+
+                match vm::interpret_bc(program) {
+                    Ok(_) => println!("Program completed!"),
+                    Err(err) => println!("{:?}", err),
+                }
             }
             _ => panic!("Unknown option (allowed options: ast/bc)"),
         }

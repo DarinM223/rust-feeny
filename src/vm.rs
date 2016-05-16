@@ -125,8 +125,32 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                     return Err(Error::new(InvalidInput, "Object: Invalid index"));
                 }
             }
-            Inst::GetSlot(name) => {}
-            Inst::SetSlot(name) => {}
+            Inst::GetSlot(name) => {
+                let name = match program.values.get(name as usize) {
+                    Some(&Value::Str(ref s)) => s.clone(),
+                    _ => return Err(Error::new(InvalidData, "GetSlot: Invalid index")),
+                };
+
+                if let Some(Obj::EnvObj(ref obj)) = vm.operand.pop() {
+                    obj.borrow().get(&name[..]).map(|val| vm.operand.push(val));
+                } else {
+                    return Err(Error::new(InvalidData, "GetSlot: Not object type"));
+                }
+            }
+            Inst::SetSlot(name) => {
+                let name = match program.values.get(name as usize) {
+                    Some(&Value::Str(ref s)) => s.clone(),
+                    _ => return Err(Error::new(InvalidData, "SetSlot: Invalid index")),
+                };
+
+                if let (Some(value), Some(Obj::EnvObj(obj))) = (vm.operand.pop(),
+                                                                vm.operand.pop()) {
+                    obj.borrow_mut().add(&name[..], value.clone());
+                    vm.operand.push(value);
+                } else {
+                    return Err(Error::new(InvalidData, "SetSlot: Not object type"));
+                }
+            }
             Inst::CallSlot(name, arity) => {}
             Inst::SetLocal(idx) => {
                 let value = match vm.operand.last() {
@@ -306,7 +330,7 @@ impl Frame {
 pub const VM_CAPACITY: usize = 13;
 
 pub struct VM {
-    /// Global variable and label name-to-value maps
+    // Global variable and label name-to-value maps
     global_vars: HashMap<String, Obj>,
     labels: HashMap<String, LabelAddr>,
 
@@ -321,6 +345,7 @@ pub struct VM {
 
 impl VM {
     pub fn new(p: &Program) -> io::Result<VM> {
+        use std::io::Error;
         use std::io::ErrorKind::*;
 
         let mut global_vars = HashMap::with_capacity(VM_CAPACITY);
@@ -335,32 +360,31 @@ impl VM {
                                      None);
             code = entry_func.code.clone();
         } else {
-            return Err(io::Error::new(InvalidInput, "Entry function needs to be a method value!"));
+            return Err(Error::new(InvalidInput, "Entry function needs to be a method value!"));
         }
 
         // Initialize global variable constant pool
         for idx in &p.slots {
-            let value = p.values.get(*idx as usize).unwrap();
-            match *value {
-                Value::Method(ref m) => {
+            match p.values.get(*idx as usize) {
+                Some(&Value::Method(ref m)) => {
                     // retrieve the method name from the constant pool
                     let name = match p.values.get(m.name as usize) {
                         Some(&Value::Str(ref s)) => s.clone(),
-                        _ => return Err(io::Error::new(InvalidData, "Invalid object type")),
+                        _ => return Err(Error::new(InvalidData, "Invalid object type")),
                     };
 
                     global_vars.insert(name, Obj::Method(m.clone()));
                 }
-                Value::Slot(val) => {
+                Some(&Value::Slot(val)) => {
                     // retrieve the slot name from the constant pool
                     let name = match p.values.get(val as usize) {
                         Some(&Value::Str(ref s)) => s.clone(),
-                        _ => return Err(io::Error::new(InvalidData, "Invalid object type")),
+                        _ => return Err(Error::new(InvalidData, "Invalid object type")),
                     };
 
                     global_vars.insert(name, Obj::Null);
                 }
-                _ => return Err(io::Error::new(InvalidData, "Invalid value type")),
+                _ => return Err(Error::new(InvalidData, "Invalid value type")),
             }
         }
 
@@ -373,8 +397,7 @@ impl VM {
                         let label_str = match p.values.get(inst as usize) {
                             Some(&Value::Str(ref s)) => s.clone(),
                             _ => {
-                                return Err(io::Error::new(InvalidData,
-                                                          "Invalid object type for LABEL"))
+                                return Err(Error::new(InvalidData, "Invalid object type for LABEL"))
                             }
                         };
 
