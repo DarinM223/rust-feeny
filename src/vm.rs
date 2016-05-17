@@ -92,10 +92,10 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                         .rev()
                         .collect();
                     let mut args = args.into_iter();
-                    let mut obj = if let Some(Obj::EnvObj(parent)) = operand.pop() {
-                        EnvObj::new(Some(parent))
-                    } else {
-                        return Err(Error::new(InvalidData, "Object: Parent not object type"));
+                    let mut obj = match operand.pop() {
+                        Some(Obj::EnvObj(parent)) => EnvObj::new(Some(parent)),
+                        Some(Obj::Null) => EnvObj::new(None),
+                        _ => return Err(Error::new(InvalidData, "Object: Parent not object type")),
                     };
 
                     for slot in &classvalue.slots {
@@ -280,7 +280,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 };
 
                 match vm.operand.pop() {
-                    Some(Obj::Null) => return Err(Error::new(InvalidData, "Branch: Type is Null")),
+                    Some(Obj::Null) => {}
                     Some(_) => vm.pc = pc,
                     None => return Err(Error::new(InvalidInput, "Branch: Invalid index")),
                 }
