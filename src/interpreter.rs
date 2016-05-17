@@ -275,7 +275,7 @@ impl Obj {
     /// Creates an Integer object if true, otherwise creates a Null object
     pub fn from_bool(b: bool) -> Obj {
         match b {
-            true => Obj::Int(IntObj { value: 1 }),
+            true => Obj::Int(IntObj { value: 0 }),
             false => Obj::Null,
         }
     }

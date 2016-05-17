@@ -136,19 +136,73 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             }
             Inst::CallSlot(name, num) => {
                 let operand = &mut vm.operand;
-                let args: Vec<_> =
+                let mut args: Vec<_> =
                     (0..num - 1).map(|_| operand.pop()).flat_map(|v| v).rev().collect();
                 let name = get_str_val!(name, program, "CallSlot");
 
                 match operand.pop() {
-                    Some(Obj::Int(i)) => {}
-                    Some(Obj::Null) => {}
-                    Some(Obj::Array(arr)) => {}
-                    Some(Obj::EnvObj(obj)) => {
-                        // TODO(DarinM223): set method code
-                        let code = Vec::new();
+                    Some(Obj::Int(i)) => {
+                        if num != 2 {
+                            return Err(Error::new(InvalidData, "CallSlot: Int arity must be 2"));
+                        }
 
-                        let mut slots = Vec::new();
+                        let arg = match args[0] {
+                            Obj::Int(i) => i,
+                            _ => return Err(Error::new(InvalidData, "CallSlot: arg must be Int")),
+                        };
+
+                        operand.push(match &name[..] {
+                            "add" => Obj::Int(i + arg),
+                            "sub" => Obj::Int(i - arg),
+                            "mul" => Obj::Int(i * arg),
+                            "div" => Obj::Int(i / arg),
+                            "mod" => Obj::Int(i % arg),
+                            "lt" => Obj::from_bool(i < arg),
+                            "gt" => Obj::from_bool(i > arg),
+                            "le" => Obj::from_bool(i <= arg),
+                            "ge" => Obj::from_bool(i >= arg),
+                            "eq" => Obj::from_bool(i == arg),
+                            _ => return Err(Error::new(InvalidData, "CallSlot: Invalid operator")),
+                        });
+                    }
+                    Some(Obj::Array(mut arr)) => {
+                        match &name[..] {
+                            "length" => operand.push(Obj::Int(arr.len() as i32)),
+                            "set" => {
+                                if num != 3 {
+                                    return Err(Error::new(InvalidData,
+                                                          "CallSlot: Arr set arity must be 3"));
+                                }
+                                let (data, index) = (args.pop().unwrap(), args.pop().unwrap());
+                                let index = match index {
+                                    Obj::Int(i) => i as usize,
+                                    _ => {
+                                        return Err(Error::new(InvalidData,
+                                                              "CallSlot: set index not int"));
+                                    }
+                                };
+                                arr[index] = data;
+                                operand.push(Obj::Null);
+                            }
+                            "get" => {
+                                if num != 2 {
+                                    return Err(Error::new(InvalidData,
+                                                          "CallSlot: Arr get arity must be 2"));
+                                }
+                                operand.push(args.remove(0));
+                            }
+                            _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
+                        }
+                    }
+                    Some(Obj::EnvObj(obj)) => {
+                        let (code, nargs) = match obj.borrow().get(&name[..]) {
+                            Some(Obj::Method(m)) => {
+                                (m.code.clone(), m.nargs as usize + m.nlocals as usize + 1)
+                            }
+                            _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
+                        };
+
+                        let mut slots = Vec::with_capacity(nargs);
                         // Slot 0 in the new local frame holds the receiver object
                         // Following slots hold argument values from last-popped to first-popped
                         slots.push(Obj::EnvObj(obj));
@@ -288,6 +342,16 @@ pub enum Obj {
     Array(Vec<Obj>),
     Method(MethodValue),
     EnvObj(EnvObjRef<Obj>),
+}
+
+impl Obj {
+    /// Creates an Integer object if true, otherwise creates a Null object
+    pub fn from_bool(b: bool) -> Obj {
+        match b {
+            true => Obj::Int(0),
+            false => Obj::Null,
+        }
+    }
 }
 
 /// Contains the parent method's code
