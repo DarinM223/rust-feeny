@@ -55,6 +55,7 @@ impl Value {
                          method.nlocals);
 
                 for inst in &method.code {
+                    print!("     ");
                     inst.print();
                     println!("");
                 }
@@ -115,7 +116,7 @@ impl Inst {
             OpCode::GetSlot => Inst::GetSlot(try!(read_short(f))),
             OpCode::SetSlot => Inst::SetSlot(try!(read_short(f))),
             OpCode::CallSlot => Inst::CallSlot(try!(read_short(f)), try!(read_byte(f))),
-            OpCode::Call => Inst::CallSlot(try!(read_short(f)), try!(read_byte(f))),
+            OpCode::Call => Inst::Call(try!(read_short(f)), try!(read_byte(f))),
             OpCode::SetLocal => Inst::SetLocal(try!(read_short(f))),
             OpCode::GetLocal => Inst::GetLocal(try!(read_short(f))),
             OpCode::SetGlobal => Inst::SetGlobal(try!(read_short(f))),
@@ -174,7 +175,7 @@ impl Program {
         for (i, value) in self.values.iter().enumerate() {
             print!("#{}: ", i);
             value.print();
-            print!("    ");
+            println!("");
         }
         println!("");
         println!("Globals: ");

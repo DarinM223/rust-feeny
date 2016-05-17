@@ -56,6 +56,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 }
             }
             Inst::Printf(format, num) => {
+                debug!("Printf: format {}, num {}", format, num);
                 {
                     let mut args = (0..num).map(|_| vm.operand.pop()).flat_map(|v| v).rev();
                     let format_str = get_str_val!(format, program, "Printf");
@@ -76,6 +77,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 vm.operand.push(Obj::Null);
             }
             Inst::Object(class) => {
+                debug!("Object: {}", class);
                 if let Some(&Value::Class(ref classvalue)) = program.values.get(class as usize) {
                     let operand = &mut vm.operand;
                     // For all of the slots in the class value,
@@ -116,6 +118,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 }
             }
             Inst::GetSlot(name) => {
+                debug!("Getting slot: {}", name);
                 let name = get_str_val!(name, program, "GetSlot");
                 if let Some(Obj::EnvObj(ref obj)) = vm.operand.pop() {
                     obj.borrow().get(&name[..]).map(|val| vm.operand.push(val));
@@ -124,6 +127,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 }
             }
             Inst::SetSlot(name) => {
+                debug!("Setting slot: {}", name);
                 let name = get_str_val!(name, program, "SetSlot");
                 if let (Some(value), Some(Obj::EnvObj(obj))) = (vm.operand.pop(),
                                                                 vm.operand.pop()) {
@@ -136,8 +140,9 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             Inst::CallSlot(name, num) => {
                 let operand = &mut vm.operand;
                 let mut args: Vec<_> =
-                    (0..num - 1).map(|_| operand.pop()).flat_map(|v| v).rev().collect();
+                    (0..(num as i32) - 1).map(|_| operand.pop()).flat_map(|v| v).rev().collect();
                 let name = get_str_val!(name, program, "CallSlot");
+                debug!("Calling slot: {} with num: {}", name, num);
 
                 match operand.pop() {
                     Some(Obj::Int(i)) => {
@@ -222,10 +227,12 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                         vm.local_frame = Some(new_frame);
                         vm.pc = -1;
                     }
+                    None => return Err(Error::new(InvalidData, "Object not found")),
                     _ => return Err(Error::new(InvalidData, "Unknown object type")),
                 }
             }
             Inst::SetLocal(idx) => {
+                debug!("Set local: {}", idx);
                 let value = match vm.operand.last() {
                     Some(v) => v.clone(),
                     None => return Err(Error::new(InvalidData, "SetLocal: Op stack empty")),
@@ -233,6 +240,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 get_mut_ref!(vm.local_frame).slots[idx as usize] = value;
             }
             Inst::GetLocal(idx) => {
+                debug!("Get local: {}", idx);
                 let value = match get_ref!(vm.local_frame).slots.get(idx as usize) {
                     Some(v) => v.clone(),
                     _ => return Err(Error::new(InvalidInput, "GetLocal: Invalid index")),
@@ -240,6 +248,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 vm.operand.push(value);
             }
             Inst::SetGlobal(name) => {
+                debug!("Set global: {}", name);
                 let name = get_str_val!(name, program, "SetGlobal");
                 let value = match vm.operand.last() {
                     Some(v) => v.clone(),
@@ -249,6 +258,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 vm.global_vars.insert(name, value);
             }
             Inst::GetGlobal(name) => {
+                debug!("Get global: {}", name);
                 let name = get_str_val!(name, program, "GetGlobal");
                 let value = match vm.global_vars.get(&name) {
                     Some(v) => v.clone(),
@@ -262,6 +272,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             }
             Inst::Label(..) => {}
             Inst::Branch(name) => {
+                debug!("Branch: {}", name);
                 let name = get_str_val!(name, program, "Branch");
                 let pc = match vm.labels.get(&name) {
                     Some(ref label) => label.pc,
@@ -275,6 +286,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 }
             }
             Inst::Goto(name) => {
+                debug!("Goto: {}", name);
                 let name = get_str_val!(name, program, "Goto");
                 let pc = match vm.labels.get(&name) {
                     Some(ref label) => label.pc,
@@ -284,6 +296,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 vm.pc = pc;
             }
             Inst::Call(name, num) => {
+                debug!("Call: Name {} Num {}", name, num);
                 let operand = &mut vm.operand;
                 let args = (0..num).map(|_| operand.pop()).flat_map(|v| v).rev();
                 let name = get_str_val!(name, program, "Call");
@@ -313,12 +326,13 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 vm.pc = -1;
             }
             Inst::Return => {
+                debug!("Return");
                 vm.local_frame.take().map(|mut frame| {
                     if let Some(parent) = frame.parent.take() {
                         vm.local_frame = Some(*parent);
                     }
                     vm.pc = frame.ret_addr.pc;
-                    vm.code = frame.ret_addr.code.take().unwrap();
+                    frame.ret_addr.code.take().map(|code| vm.code = code);
                 });
 
                 // Return once all of the frames have been returned from
@@ -468,6 +482,11 @@ impl VM {
                 }
             }
         }
+
+        debug!("Global vars: {:?}", global_vars);
+        debug!("Labels: {:?}", labels);
+        debug!("Code: {:?}", code);
+        debug!("Local frame {:?}", local_frame);
 
         Ok(VM {
             global_vars: global_vars,
