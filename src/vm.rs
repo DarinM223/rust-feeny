@@ -40,7 +40,6 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
     let mut vm = try!(VM::new(&program));
 
     while vm.pc < vm.code.len() as i32 {
-        // TODO(DarinM223): implement this
         match *vm.code.get(vm.pc as usize).unwrap() {
             Inst::Lit(idx) => {
                 match program.values.get(idx as usize) {
@@ -202,11 +201,14 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                             _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
                         };
 
-                        let mut slots = Vec::with_capacity(nargs);
+                        let mut slots = vec![Obj::Null; nargs];
                         // Slot 0 in the new local frame holds the receiver object
                         // Following slots hold argument values from last-popped to first-popped
-                        slots.push(Obj::EnvObj(obj));
-                        let _ = args.into_iter().map(|arg| slots.push(arg));
+                        slots[0] = Obj::EnvObj(obj);
+                        args.into_iter().fold(1, |index, arg| {
+                            slots[index] = arg;
+                            index + 1
+                        });
 
                         let new_frame = Frame {
                             slots: slots,
