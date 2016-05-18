@@ -50,16 +50,17 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             }
             Inst::Array => {
                 if let (Some(init), Some(Obj::Int(len))) = (vm.operand.pop(), vm.operand.pop()) {
-                    vm.operand.push(Obj::Array(vec![init; len as usize]));
+                    vm.operand.push(Obj::Array(Rc::new(RefCell::new(vec![init; len as usize]))));
                 } else {
                     return Err(Error::new(InvalidData, "Invalid length type for ARRAY"));
                 }
             }
             Inst::Printf(format, num) => {
-                debug!("Printf: format {}, num {}", format, num);
                 {
-                    let mut args = (0..num).map(|_| vm.operand.pop()).flat_map(|v| v).rev();
                     let format_str = get_str_val!(format, program, "Printf");
+                    let args: Vec<_> = (0..num).map(|_| vm.operand.pop()).flat_map(|v| v).collect();
+                    debug!("Printf: format \"{}\", args {:?}", format_str, args);
+                    let mut args = args.into_iter().rev();
 
                     // Print the values from last popped to first popped
                     for ch in format_str.chars() {
@@ -89,9 +90,8 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                             Some(&Value::Slot(_)) => operand.pop(),
                             _ => None,
                         })
-                        .rev()
                         .collect();
-                    let mut args = args.into_iter();
+                    let mut args = args.into_iter().rev();
                     let mut obj = match operand.pop() {
                         Some(Obj::EnvObj(parent)) => EnvObj::new(Some(parent)),
                         Some(Obj::Null) => EnvObj::new(None),
@@ -171,10 +171,10 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                             _ => return Err(Error::new(InvalidData, "CallSlot: Invalid operator")),
                         });
                     }
-                    Some(Obj::Array(mut arr)) => {
+                    Some(Obj::Array(arr)) => {
                         debug!("Array slot: {:?} for {:?}", name, arr);
                         match &name[..] {
-                            "length" => operand.push(Obj::Int(arr.len() as i32)),
+                            "length" => operand.push(Obj::Int(arr.borrow().len() as i32)),
                             "set" => {
                                 if num != 3 {
                                     return Err(Error::new(InvalidData,
@@ -188,7 +188,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                                                               "CallSlot: set index not int"));
                                     }
                                 };
-                                arr[index] = data;
+                                arr.borrow_mut()[index] = data;
                                 operand.push(Obj::Null);
                             }
                             "get" => {
@@ -196,7 +196,14 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                                     return Err(Error::new(InvalidData,
                                                           "CallSlot: Arr get arity must be 2"));
                                 }
-                                operand.push(args.remove(0));
+                                let index = match args.remove(0) {
+                                    Obj::Int(i) => i as usize,
+                                    _ => {
+                                        return Err(Error::new(InvalidData,
+                                                              "CallSlot: set index not int"));
+                                    }
+                                };
+                                operand.push(arr.borrow()[index].clone());
                             }
                             _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
                         }
@@ -361,7 +368,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
 pub enum Obj {
     Int(i32),
     Null,
-    Array(Vec<Obj>),
+    Array(Rc<RefCell<Vec<Obj>>>),
     Method(MethodValue),
     EnvObj(EnvObjRef<Obj>),
 }
