@@ -177,31 +177,23 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                             "length" => operand.push(Obj::Int(arr.borrow().len() as i32)),
                             "set" => {
                                 if num != 3 {
-                                    return Err(Error::new(InvalidData,
-                                                          "CallSlot: Arr set arity must be 3"));
+                                    return inval_err("CallSlot", "Arity must be 3");
                                 }
                                 let (index, data) = (args.pop().unwrap(), args.pop().unwrap());
                                 let index = match index {
                                     Obj::Int(i) => i as usize,
-                                    _ => {
-                                        return Err(Error::new(InvalidData,
-                                                              "CallSlot: set index not int"));
-                                    }
+                                    _ => return inval_err("CallSlot", "Set index not int"),
                                 };
                                 arr.borrow_mut()[index] = data;
                                 operand.push(Obj::Null);
                             }
                             "get" => {
                                 if num != 2 {
-                                    return Err(Error::new(InvalidData,
-                                                          "CallSlot: Arr get arity must be 2"));
+                                    return inval_err("CallSlot", "Arity must be 2");
                                 }
                                 let index = match args.remove(0) {
                                     Obj::Int(i) => i as usize,
-                                    _ => {
-                                        return Err(Error::new(InvalidData,
-                                                              "CallSlot: set index not int"));
-                                    }
+                                    _ => return inval_err("CallSlot", "Set index not int"),
                                 };
                                 operand.push(arr.borrow()[index].clone());
                             }
@@ -510,4 +502,9 @@ impl VM {
             local_frame: Some(local_frame),
         })
     }
+}
+
+/// Returns an io::Error with InvalidData
+fn inval_err(name: &str, text: &str) -> io::Result<()> {
+    return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}: {}", name, text)));
 }
