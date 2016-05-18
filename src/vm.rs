@@ -140,11 +140,11 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             Inst::CallSlot(name, num) => {
                 let operand = &mut vm.operand;
                 let mut args: Vec<_> =
-                    (0..(num as i32) - 1).map(|_| operand.pop()).flat_map(|v| v).rev().collect();
+                    (0..(num as i32) - 1).map(|_| operand.pop()).flat_map(|v| v).collect();
                 let name = get_str_val!(name, program, "CallSlot");
-                debug!("Calling slot: {} with num: {}", name, num);
 
-                match operand.pop() {
+                let slot_obj = operand.pop();
+                match slot_obj {
                     Some(Obj::Int(i)) => {
                         if num != 2 {
                             return Err(Error::new(InvalidData, "CallSlot: Int arity must be 2"));
@@ -154,6 +154,8 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                             Obj::Int(i) => i,
                             _ => return Err(Error::new(InvalidData, "CallSlot: arg must be Int")),
                         };
+
+                        debug!("Calling int slot: {:?} between {} and {}", name, i, arg);
 
                         operand.push(match &name[..] {
                             "add" => Obj::Int(i + arg),
@@ -170,6 +172,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                         });
                     }
                     Some(Obj::Array(mut arr)) => {
+                        debug!("Array slot: {:?} for {:?}", name, arr);
                         match &name[..] {
                             "length" => operand.push(Obj::Int(arr.len() as i32)),
                             "set" => {
@@ -177,7 +180,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                                     return Err(Error::new(InvalidData,
                                                           "CallSlot: Arr set arity must be 3"));
                                 }
-                                let (data, index) = (args.pop().unwrap(), args.pop().unwrap());
+                                let (index, data) = (args.pop().unwrap(), args.pop().unwrap());
                                 let index = match index {
                                     Obj::Int(i) => i as usize,
                                     _ => {
@@ -199,6 +202,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                         }
                     }
                     Some(Obj::EnvObj(obj)) => {
+                        debug!("Object slot: {:?}", name);
                         let (code, nargs) = match obj.borrow().get(&name[..]) {
                             Some(Obj::Method(m)) => {
                                 (m.code.clone(), m.nargs as usize + m.nlocals as usize + 1)
@@ -210,7 +214,7 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                         // Slot 0 in the new local frame holds the receiver object
                         // Following slots hold argument values from last-popped to first-popped
                         slots[0] = Obj::EnvObj(obj);
-                        args.into_iter().fold(1, |index, arg| {
+                        args.into_iter().rev().fold(1, |index, arg| {
                             slots[index] = arg;
                             index + 1
                         });
@@ -240,11 +244,11 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 get_mut_ref!(vm.local_frame).slots[idx as usize] = value;
             }
             Inst::GetLocal(idx) => {
-                debug!("Get local: {}", idx);
                 let value = match get_ref!(vm.local_frame).slots.get(idx as usize) {
                     Some(v) => v.clone(),
                     _ => return Err(Error::new(InvalidInput, "GetLocal: Invalid index")),
                 };
+                debug!("Get local: {:?}", value);
                 vm.operand.push(value);
             }
             Inst::SetGlobal(name) => {
@@ -272,33 +276,33 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
             }
             Inst::Label(..) => {}
             Inst::Branch(name) => {
-                debug!("Branch: {}", name);
                 let name = get_str_val!(name, program, "Branch");
                 let pc = match vm.labels.get(&name) {
                     Some(ref label) => label.pc,
                     _ => return Err(Error::new(InvalidData, "Branch: Invalid name")),
                 };
 
-                match vm.operand.pop() {
+                let predicate = vm.operand.pop();
+                debug!("Branch: {:?}", predicate);
+                match predicate {
                     Some(Obj::Null) => {}
                     Some(_) => vm.pc = pc,
                     None => return Err(Error::new(InvalidInput, "Branch: Invalid index")),
                 }
             }
             Inst::Goto(name) => {
-                debug!("Goto: {}", name);
                 let name = get_str_val!(name, program, "Goto");
                 let pc = match vm.labels.get(&name) {
                     Some(ref label) => label.pc,
                     _ => return Err(Error::new(InvalidData, "Goto: Invalid name")),
                 };
+                debug!("Goto: {} #{}", name, pc);
 
                 vm.pc = pc;
             }
             Inst::Call(name, num) => {
-                debug!("Call: Name {} Num {}", name, num);
                 let operand = &mut vm.operand;
-                let args = (0..num).map(|_| operand.pop()).flat_map(|v| v).rev();
+                let args: Vec<_> = (0..num).map(|_| operand.pop()).flat_map(|v| v).collect();
                 let name = get_str_val!(name, program, "Call");
                 let (code, nslots) = if let Some(&Obj::Method(ref m)) = vm.global_vars.get(&name) {
                     (m.code.clone(), m.nargs as usize + m.nlocals as usize)
@@ -309,10 +313,12 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                 let mut slots = vec![Obj::Null; nslots];
                 // Populate slots with the argument values from
                 // last popped to first popped from the operand stack
-                args.fold(0, |counter, arg| {
+                args.into_iter().rev().fold(0, |counter, arg| {
                     slots[counter] = arg;
                     counter + 1
                 });
+
+                debug!("Call: {} slots: {:?}", name, slots);
 
                 let new_frame = Frame {
                     slots: slots,
