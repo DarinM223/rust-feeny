@@ -210,14 +210,14 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
                     }
                     Some(Obj::EnvObj(obj)) => {
                         debug!("Object slot: {:?}", name);
-                        let (code, nargs) = match obj.borrow().get(&name[..]) {
+                        let (code, nslots) = match obj.borrow().get(&name[..]) {
                             Some(Obj::Method(m)) => {
                                 (m.code.clone(), m.nargs as usize + m.nlocals as usize + 1)
                             }
                             _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
                         };
 
-                        let mut slots = vec![Obj::Null; nargs];
+                        let mut slots = vec![Obj::Null; nslots];
                         // Slot 0 in the new local frame holds the receiver object
                         // Following slots hold argument values from last-popped to first-popped
                         slots[0] = Obj::EnvObj(obj);
@@ -408,7 +408,7 @@ impl Frame {
                num_slots: i32,
                parent: Option<Box<Frame>>)
                -> Frame {
-        let slots = Vec::with_capacity(num_slots as usize);
+        let slots = vec![Obj::Null; num_slots as usize];
         let ret_addr = LabelAddr {
             code: code,
             pc: pc,
