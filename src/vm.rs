@@ -34,13 +34,180 @@ macro_rules! get_str_val {
 
 /// Interprets the bytecode structure
 pub fn interpret_bc(program: Program) -> io::Result<()> {
-    use std::io::Error;
-    use std::io::ErrorKind::*;
-
     let mut vm = try!(VM::new(&program));
 
     while vm.pc < vm.code.len() as i32 {
-        match *vm.code.get(vm.pc as usize).unwrap() {
+        let pc = vm.pc as usize;
+        match try!(vm.eval(pc, &program)) {
+            EvalResult::Continue => vm.pc += 1,
+            EvalResult::Return => break,
+        }
+    }
+
+    Ok(())
+}
+
+/// The result of evaluating an instruction
+pub enum EvalResult {
+    /// Continue processing instructions
+    Continue,
+    /// Return from the program
+    Return,
+}
+
+/// An object that can be stored as a variable
+/// used in the global variable constant pool,
+/// the operand stack, and the frames
+#[derive(Clone, Debug, PartialEq)]
+pub enum Obj {
+    Int(i32),
+    Null,
+    Array(Rc<RefCell<Vec<Obj>>>),
+    Method(MethodValue),
+    EnvObj(EnvObjRef<Obj>),
+}
+
+impl Obj {
+    /// Creates an Integer object if true, otherwise creates a Null object
+    pub fn from_bool(b: bool) -> Obj {
+        match b {
+            true => Obj::Int(0),
+            false => Obj::Null,
+        }
+    }
+}
+
+/// Contains the parent method's code
+/// and the program counter of the label
+#[derive(Clone, Debug, PartialEq)]
+struct LabelAddr {
+    code: Option<Vec<Inst>>,
+    pc: i32,
+}
+
+/// The context in which a function is executing
+#[derive(Clone, Debug, PartialEq)]
+pub struct Frame {
+    /// Arguments to the function + local variables
+    slots: Vec<Obj>,
+    /// The address of the instruction that called the function
+    ret_addr: LabelAddr,
+    /// The context of the parent
+    parent: Option<Box<Frame>>,
+}
+
+impl Frame {
+    pub fn new(code: Option<Vec<Inst>>,
+               pc: i32,
+               num_slots: i32,
+               parent: Option<Box<Frame>>)
+               -> Frame {
+        let slots = vec![Obj::Null; num_slots as usize];
+        let ret_addr = LabelAddr {
+            code: code,
+            pc: pc,
+        };
+
+        Frame {
+            slots: slots,
+            ret_addr: ret_addr,
+            parent: parent,
+        }
+    }
+}
+
+pub const VM_CAPACITY: usize = 13;
+
+pub struct VM {
+    // Global variable and label name-to-value maps
+    global_vars: HashMap<String, Obj>,
+    labels: HashMap<String, LabelAddr>,
+
+    code: Vec<Inst>,
+    /// Address of the next instruction to execute
+    pc: i32,
+    /// A stack for the temp results for evaluation
+    operand: Vec<Obj>,
+    /// The context in which the current frame is executing
+    local_frame: Option<Frame>,
+}
+
+impl VM {
+    pub fn new(p: &Program) -> io::Result<VM> {
+        use std::io::Error;
+        use std::io::ErrorKind::*;
+
+        let mut global_vars = HashMap::with_capacity(VM_CAPACITY);
+        let mut labels = HashMap::with_capacity(VM_CAPACITY);
+        let local_frame;
+        let code;
+
+        if let Some(&Value::Method(ref entry_func)) = p.values.get(p.entry as usize) {
+            local_frame = Frame::new(None,
+                                     0,
+                                     (entry_func.nargs as i32) + (entry_func.nlocals as i32),
+                                     None);
+            code = entry_func.code.clone();
+        } else {
+            return Err(Error::new(InvalidInput, "Entry function needs to be a method value!"));
+        }
+
+        // Initialize global variable constant pool
+        for idx in &p.slots {
+            match p.values.get(*idx as usize) {
+                Some(&Value::Method(ref m)) => {
+                    // retrieve the method name from the constant pool
+                    let name = get_str_val!(m.name, p, "VM_Method");
+                    global_vars.insert(name, Obj::Method(m.clone()));
+                }
+                Some(&Value::Slot(val)) => {
+                    // retrieve the slot name from the constant pool
+                    let name = get_str_val!(val, p, "VM_Slot");
+                    global_vars.insert(name, Obj::Null);
+                }
+                _ => return Err(Error::new(InvalidData, "Invalid value type")),
+            }
+        }
+
+        // Store labels in map
+        for val in &p.values {
+            if let Value::Method(ref m) = *val {
+                for (pc, inst) in m.code.iter().enumerate() {
+                    if let Inst::Label(inst) = *inst {
+                        // Retrieve the label name from the constant pool
+                        let label_str = get_str_val!(inst, p, "VM_Label");
+
+                        // Insert into the map with the key as the label name
+                        // and the label containing the program counter at the label
+                        // and the code being the cloned code of the method
+                        labels.insert(label_str,
+                                      LabelAddr {
+                                          code: Some(m.code.clone()),
+                                          pc: pc as i32,
+                                      });
+                    }
+                }
+            }
+        }
+
+        Ok(VM {
+            global_vars: global_vars,
+            labels: labels,
+            code: code,
+            pc: 0,
+            operand: Vec::new(),
+            local_frame: Some(local_frame),
+        })
+    }
+
+    /// Evaluates the instruction at the given program counter
+    #[inline]
+    pub fn eval(&mut self, pc: usize, program: &Program) -> io::Result<EvalResult> {
+        use std::io::Error;
+        use std::io::ErrorKind::*;
+
+        let vm = self;
+        match *vm.code.get(pc).unwrap() {
             Inst::Lit(idx) => {
                 match program.values.get(idx as usize) {
                     Some(&Value::Int(i)) => vm.operand.push(Obj::Int(i)),
@@ -342,169 +509,17 @@ pub fn interpret_bc(program: Program) -> io::Result<()> {
 
                 // Return once all of the frames have been returned from
                 if vm.local_frame == None {
-                    break;
+                    return Ok(EvalResult::Return);
                 }
             }
         }
 
-        vm.pc += 1;
-    }
-
-    Ok(())
-}
-
-/// An object that can be stored as a variable
-/// used in the global variable constant pool,
-/// the operand stack, and the frames
-#[derive(Clone, Debug, PartialEq)]
-pub enum Obj {
-    Int(i32),
-    Null,
-    Array(Rc<RefCell<Vec<Obj>>>),
-    Method(MethodValue),
-    EnvObj(EnvObjRef<Obj>),
-}
-
-impl Obj {
-    /// Creates an Integer object if true, otherwise creates a Null object
-    pub fn from_bool(b: bool) -> Obj {
-        match b {
-            true => Obj::Int(0),
-            false => Obj::Null,
-        }
-    }
-}
-
-/// Contains the parent method's code
-/// and the program counter of the label
-#[derive(Clone, Debug, PartialEq)]
-struct LabelAddr {
-    code: Option<Vec<Inst>>,
-    pc: i32,
-}
-
-/// The context in which a function is executing
-#[derive(Clone, Debug, PartialEq)]
-pub struct Frame {
-    /// Arguments to the function + local variables
-    slots: Vec<Obj>,
-    /// The address of the instruction that called the function
-    ret_addr: LabelAddr,
-    /// The context of the parent
-    parent: Option<Box<Frame>>,
-}
-
-impl Frame {
-    pub fn new(code: Option<Vec<Inst>>,
-               pc: i32,
-               num_slots: i32,
-               parent: Option<Box<Frame>>)
-               -> Frame {
-        let slots = vec![Obj::Null; num_slots as usize];
-        let ret_addr = LabelAddr {
-            code: code,
-            pc: pc,
-        };
-
-        Frame {
-            slots: slots,
-            ret_addr: ret_addr,
-            parent: parent,
-        }
-    }
-}
-
-pub const VM_CAPACITY: usize = 13;
-
-pub struct VM {
-    // Global variable and label name-to-value maps
-    global_vars: HashMap<String, Obj>,
-    labels: HashMap<String, LabelAddr>,
-
-    code: Vec<Inst>,
-    /// Address of the next instruction to execute
-    pc: i32,
-    /// A stack for the temp results for evaluation
-    operand: Vec<Obj>,
-    /// The context in which the current frame is executing
-    local_frame: Option<Frame>,
-}
-
-impl VM {
-    pub fn new(p: &Program) -> io::Result<VM> {
-        use std::io::Error;
-        use std::io::ErrorKind::*;
-
-        let mut global_vars = HashMap::with_capacity(VM_CAPACITY);
-        let mut labels = HashMap::with_capacity(VM_CAPACITY);
-        let local_frame;
-        let code;
-
-        if let Some(&Value::Method(ref entry_func)) = p.values.get(p.entry as usize) {
-            local_frame = Frame::new(None,
-                                     0,
-                                     (entry_func.nargs as i32) + (entry_func.nlocals as i32),
-                                     None);
-            code = entry_func.code.clone();
-        } else {
-            return Err(Error::new(InvalidInput, "Entry function needs to be a method value!"));
-        }
-
-        // Initialize global variable constant pool
-        for idx in &p.slots {
-            match p.values.get(*idx as usize) {
-                Some(&Value::Method(ref m)) => {
-                    // retrieve the method name from the constant pool
-                    let name = get_str_val!(m.name, p, "VM_Method");
-                    global_vars.insert(name, Obj::Method(m.clone()));
-                }
-                Some(&Value::Slot(val)) => {
-                    // retrieve the slot name from the constant pool
-                    let name = get_str_val!(val, p, "VM_Slot");
-                    global_vars.insert(name, Obj::Null);
-                }
-                _ => return Err(Error::new(InvalidData, "Invalid value type")),
-            }
-        }
-
-        // Store labels in map
-        for val in &p.values {
-            if let Value::Method(ref m) = *val {
-                for (pc, inst) in m.code.iter().enumerate() {
-                    if let Inst::Label(inst) = *inst {
-                        // Retrieve the label name from the constant pool
-                        let label_str = get_str_val!(inst, p, "VM_Label");
-
-                        // Insert into the map with the key as the label name
-                        // and the label containing the program counter at the label
-                        // and the code being the cloned code of the method
-                        labels.insert(label_str,
-                                      LabelAddr {
-                                          code: Some(m.code.clone()),
-                                          pc: pc as i32,
-                                      });
-                    }
-                }
-            }
-        }
-
-        debug!("Global vars: {:?}", global_vars);
-        debug!("Labels: {:?}", labels);
-        debug!("Code: {:?}", code);
-        debug!("Local frame {:?}", local_frame);
-
-        Ok(VM {
-            global_vars: global_vars,
-            labels: labels,
-            code: code,
-            pc: 0,
-            operand: Vec::new(),
-            local_frame: Some(local_frame),
-        })
+        Ok(EvalResult::Continue)
     }
 }
 
 /// Returns an io::Error with InvalidData
-fn inval_err(name: &str, text: &str) -> io::Result<()> {
+#[inline]
+fn inval_err(name: &str, text: &str) -> io::Result<EvalResult> {
     return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}: {}", name, text)));
 }

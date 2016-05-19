@@ -473,6 +473,7 @@ pub struct ScopeSeq {
     pub b: ScopeStmt,
 }
 
+#[allow(dead_code)]
 #[repr(i32)]
 enum AstTag {
     IntExp = 0,

@@ -200,6 +200,7 @@ pub struct ClassValue {
     pub slots: Vec<i16>,
 }
 
+#[allow(dead_code)]
 #[repr(u8)]
 enum ValTag {
     Int = 0,
@@ -217,6 +218,7 @@ impl ValTag {
     }
 }
 
+#[allow(dead_code)]
 #[repr(u8)]
 enum OpCode {
     Label = 0,
