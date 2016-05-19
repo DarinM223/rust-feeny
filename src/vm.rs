@@ -3,6 +3,8 @@ use interpreter::{EnvObj, EnvObjRef};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
+use std::io::Error;
+use std::io::ErrorKind::*;
 use std::mem;
 use std::rc::Rc;
 
@@ -134,23 +136,15 @@ pub struct VM {
 
 impl VM {
     pub fn new(p: &Program) -> io::Result<VM> {
-        use std::io::Error;
-        use std::io::ErrorKind::*;
-
         let mut global_vars = HashMap::with_capacity(VM_CAPACITY);
         let mut labels = HashMap::with_capacity(VM_CAPACITY);
-        let local_frame;
-        let code;
-
-        if let Some(&Value::Method(ref entry_func)) = p.values.get(p.entry as usize) {
-            local_frame = Frame::new(None,
-                                     0,
-                                     (entry_func.nargs as i32) + (entry_func.nlocals as i32),
-                                     None);
-            code = entry_func.code.clone();
-        } else {
-            return Err(Error::new(InvalidInput, "Entry function needs to be a method value!"));
-        }
+        let (local_frame, code) = match p.values.get(p.entry as usize) {
+            Some(&Value::Method(ref entry_func)) => {
+                let nslots = (entry_func.nargs as i32) + (entry_func.nlocals as i32);
+                (Frame::new(None, 0, nslots, None), entry_func.code.clone())
+            }
+            _ => return Err(Error::new(InvalidInput, "Entry function needs to be a method value!")),
+        };
 
         // Initialize global variable constant pool
         for idx in &p.slots {
@@ -203,9 +197,6 @@ impl VM {
     /// Evaluates the instruction at the given program counter
     #[inline]
     pub fn eval(&mut self, pc: usize, program: &Program) -> io::Result<EvalResult> {
-        use std::io::Error;
-        use std::io::ErrorKind::*;
-
         let vm = self;
         match *vm.code.get(pc).unwrap() {
             Inst::Lit(idx) => {
@@ -223,29 +214,26 @@ impl VM {
                 }
             }
             Inst::Printf(format, num) => {
-                {
-                    let format_str = get_str_val!(format, program, "Printf");
-                    let args: Vec<_> = (0..num).map(|_| vm.operand.pop()).flat_map(|v| v).collect();
-                    debug!("Printf: format \"{}\", args {:?}", format_str, args);
-                    let mut args = args.into_iter().rev();
+                let format_str = get_str_val!(format, program, "Printf");
+                let args: Vec<_> = (0..num).map(|_| vm.operand.pop()).flat_map(|v| v).collect();
+                debug!("Printf: format \"{}\", args {:?}", format_str, args);
+                let mut args = args.into_iter().rev();
 
-                    // Print the values from last popped to first popped
-                    for ch in format_str.chars() {
-                        if ch == '~' {
-                            if let Some(Obj::Int(i)) = args.next() {
-                                print!("{}", i);
-                            } else {
-                                return Err(Error::new(InvalidInput, "Printf: Error printing int"));
-                            }
+                // Print the values from last popped to first popped
+                for ch in format_str.chars() {
+                    if ch == '~' {
+                        if let Some(Obj::Int(i)) = args.next() {
+                            print!("{}", i);
                         } else {
-                            print!("{}", ch);
+                            return Err(Error::new(InvalidInput, "Printf: Error printing int"));
                         }
+                    } else {
+                        print!("{}", ch);
                     }
                 }
                 vm.operand.push(Obj::Null);
             }
             Inst::Object(class) => {
-                debug!("Object: {}", class);
                 if let Some(&Value::Class(ref classvalue)) = program.values.get(class as usize) {
                     let operand = &mut vm.operand;
                     // For all of the slots in the class value,
@@ -285,7 +273,6 @@ impl VM {
                 }
             }
             Inst::GetSlot(name) => {
-                debug!("Getting slot: {}", name);
                 let name = get_str_val!(name, program, "GetSlot");
                 if let Some(Obj::EnvObj(ref obj)) = vm.operand.pop() {
                     obj.borrow().get(&name[..]).map(|val| vm.operand.push(val));
@@ -294,7 +281,6 @@ impl VM {
                 }
             }
             Inst::SetSlot(name) => {
-                debug!("Setting slot: {}", name);
                 let name = get_str_val!(name, program, "SetSlot");
                 if let (Some(value), Some(Obj::EnvObj(obj))) = (vm.operand.pop(),
                                                                 vm.operand.pop()) {
@@ -310,8 +296,7 @@ impl VM {
                     (0..(num as i32) - 1).map(|_| operand.pop()).flat_map(|v| v).collect();
                 let name = get_str_val!(name, program, "CallSlot");
 
-                let slot_obj = operand.pop();
-                match slot_obj {
+                match operand.pop() {
                     Some(Obj::Int(i)) => {
                         if num != 2 {
                             return Err(Error::new(InvalidData, "CallSlot: Int arity must be 2"));
@@ -402,7 +387,6 @@ impl VM {
                 }
             }
             Inst::SetLocal(idx) => {
-                debug!("Set local: {}", idx);
                 let value = match vm.operand.last() {
                     Some(v) => v.clone(),
                     None => return Err(Error::new(InvalidData, "SetLocal: Op stack empty")),
@@ -414,11 +398,9 @@ impl VM {
                     Some(v) => v.clone(),
                     _ => return Err(Error::new(InvalidInput, "GetLocal: Invalid index")),
                 };
-                debug!("Get local: {:?}", value);
                 vm.operand.push(value);
             }
             Inst::SetGlobal(name) => {
-                debug!("Set global: {}", name);
                 let name = get_str_val!(name, program, "SetGlobal");
                 let value = match vm.operand.last() {
                     Some(v) => v.clone(),
@@ -428,7 +410,6 @@ impl VM {
                 vm.global_vars.insert(name, value);
             }
             Inst::GetGlobal(name) => {
-                debug!("Get global: {}", name);
                 let name = get_str_val!(name, program, "GetGlobal");
                 let value = match vm.global_vars.get(&name) {
                     Some(v) => v.clone(),
@@ -448,9 +429,7 @@ impl VM {
                     _ => return Err(Error::new(InvalidData, "Branch: Invalid name")),
                 };
 
-                let predicate = vm.operand.pop();
-                debug!("Branch: {:?}", predicate);
-                match predicate {
+                match vm.operand.pop() {
                     Some(Obj::Null) => {}
                     Some(_) => vm.pc = pc,
                     None => return Err(Error::new(InvalidInput, "Branch: Invalid index")),
@@ -498,7 +477,6 @@ impl VM {
                 vm.pc = -1;
             }
             Inst::Return => {
-                debug!("Return");
                 vm.local_frame.take().map(|mut frame| {
                     if let Some(parent) = frame.parent.take() {
                         vm.local_frame = Some(*parent);
