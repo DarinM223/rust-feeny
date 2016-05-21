@@ -384,18 +384,12 @@ pub enum Entry {
     Func(ScopeStmt, Vec<String>),
 }
 
+/// A generic environment object implementation that allows
+/// for prototypical inheritance (like Javascript)
 #[derive(Clone, Debug, PartialEq)]
 pub struct EnvObj<T> {
     parent: Option<Box<EnvObjRef<T>>>,
     table: HashMap<String, T>,
-}
-
-pub fn make_env_obj(parent: Option<Obj>) -> EnvObj<Entry> {
-    match parent {
-        Some(Obj::Env(env)) => EnvObj::new(Some(env)),
-        Some(Obj::Null) => EnvObj::new(None),
-        _ => panic!("{:?} not an environment object or null", parent),
-    }
 }
 
 impl<T: Clone + PartialEq> EnvObj<T> {
@@ -475,6 +469,15 @@ impl<T: Clone + PartialEq> EnvObj<T> {
         } else {
             false
         }
+    }
+}
+
+/// Create a new environment object from a parent interpreter object
+fn make_env_obj(parent: Option<Obj>) -> EnvObj<Entry> {
+    match parent {
+        Some(Obj::Env(env)) => EnvObj::new(Some(env)),
+        Some(Obj::Null) => EnvObj::new(None),
+        _ => panic!("{:?} not an environment object or null", parent),
     }
 }
 
