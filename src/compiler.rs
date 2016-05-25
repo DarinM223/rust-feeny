@@ -1,5 +1,5 @@
 use ast::{Exp, ScopeStmt, SlotStmt};
-use bytecode::{Program, Value};
+use bytecode::{Program, Inst, Value};
 use std::collections::HashMap;
 use std::io;
 
@@ -13,22 +13,71 @@ pub fn compile(stmt: &ScopeStmt) -> io::Result<Program> {
         values: Vec::new(),
         slots: Vec::new(),
         entry: 0,
+        null_idx: 0,
     };
     let entry = program.entry as i32;
-    try!(stmt.compile(None, &mut program, entry));
+    program.null_idx = program.add_value(Value::Null) as i16;
+
+    try!(stmt.compile(&mut None, &mut program, entry, &mut HashMap::new()));
     Ok(program)
+}
+
+impl Program {
+    pub fn add_value(&mut self, value: Value) -> usize {
+        self.values.push(value);
+        self.values.len() - 1
+    }
+
+    pub fn add_instruction(&mut self, index: usize, inst: Inst) -> io::Result<()> {
+        if let Some(&mut Value::Method(ref mut method)) = self.values.get_mut(index) {
+            method.code.push(inst);
+            Ok(())
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidData, "Cannot access method value"))
+        }
+    }
+
+    pub fn get_str_id(&mut self, name: &str, name_cache: &mut HashMap<String, usize>) -> usize {
+        let mut index = 0;
+        let mut got_idx = false;
+        {
+            if let Some(idx) = name_cache.get(name) {
+                index = idx.clone();
+                got_idx = true;
+            }
+        }
+
+        if !got_idx {
+            index = self.add_value(Value::Str(name.to_owned()));
+            name_cache.insert(name.to_owned(), index);
+        }
+
+        index
+    }
 }
 
 impl Exp {
     pub fn compile(&self,
-                   env: Option<&mut HashMap<String, i32>>,
+                   env: &mut Option<HashMap<String, i32>>,
                    program: &mut Program,
-                   method_idx: i32)
+                   method_idx: usize,
+                   name_cache: &mut HashMap<String, usize>)
                    -> io::Result<()> {
+        let null_idx = program.null_idx;
         match *self {
-            Exp::Int(i) => {}
-            Exp::Null => {}
-            Exp::Printf(ref printf) => {}
+            Exp::Int(i) => {
+                let index = program.add_value(Value::Int(i)) as i16;
+                try!(program.add_instruction(method_idx, Inst::Lit(index)));
+            }
+            Exp::Null => try!(program.add_instruction(method_idx, Inst::Lit(null_idx))),
+            Exp::Printf(ref printf) => {
+                let format_id = program.get_str_id(&printf.format[..], name_cache);
+                for exp in &printf.exps {
+                    exp.compile(env, program, method_idx, name_cache);
+                }
+                program.add_instruction(method_idx,
+                                        Inst::Printf(format_id as i16, printf.nexps as u8));
+            }
             Exp::Array(ref arr) => {}
             Exp::Object(ref obj) => {}
             Exp::Slot(ref slot) => {}
@@ -46,9 +95,10 @@ impl Exp {
 
 impl ScopeStmt {
     pub fn compile(&self,
-                   env: Option<&mut HashMap<String, i32>>,
+                   env: &mut Option<HashMap<String, i32>>,
                    program: &mut Program,
-                   method_idx: i32)
+                   method_idx: i32,
+                   name_cache: &mut HashMap<String, usize>)
                    -> io::Result<()> {
         match *self {
             ScopeStmt::Var(ref var) => {}
@@ -62,9 +112,10 @@ impl ScopeStmt {
 
 impl SlotStmt {
     pub fn compile(&self,
-                   env: Option<&mut HashMap<String, i32>>,
+                   env: &mut Option<HashMap<String, i32>>,
                    program: &mut Program,
-                   method_idx: i32)
+                   method_idx: i32,
+                   name_cache: &mut HashMap<String, usize>)
                    -> io::Result<()> {
         match *self {
             SlotStmt::Var(ref var) => {}
