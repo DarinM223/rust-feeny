@@ -1,5 +1,5 @@
 use ast::{Exp, ScopeStmt, SlotStmt};
-use bytecode::{Program, Inst, Value};
+use bytecode::{ClassValue, Program, Inst, Value};
 use std::collections::HashMap;
 use std::io;
 
@@ -75,13 +75,36 @@ impl Exp {
                 for exp in &printf.exps {
                     exp.compile(env, program, method_idx, name_cache);
                 }
-                program.add_instruction(method_idx,
-                                        Inst::Printf(format_id as i16, printf.nexps as u8));
+                try!(program.add_instruction(method_idx,
+                                             Inst::Printf(format_id as i16, printf.nexps as u8)));
             }
-            Exp::Array(ref arr) => {}
-            Exp::Object(ref obj) => {}
-            Exp::Slot(ref slot) => {}
-            Exp::SetSlot(ref setslot) => {}
+            Exp::Array(ref arr) => {
+                arr.length.compile(env, program, method_idx, name_cache);
+                arr.init.compile(env, program, method_idx, name_cache);
+                program.add_instruction(method_idx, Inst::Array);
+            }
+            Exp::Object(ref obj) => {
+                obj.parent.compile(env, program, method_idx, name_cache);
+                let mut class_val = ClassValue { slots: vec![] };
+                for slot in &obj.slots {
+                    class_val.slots.push(try!(slot.compile(env, program, method_idx, name_cache)));
+                }
+
+                let class_id = program.add_value(Value::Class(class_val));
+                try!(program.add_instruction(method_idx, Inst::Object(class_id as i16)));
+            }
+            Exp::Slot(ref slot) => {
+                slot.exp.compile(env, program, method_idx, name_cache);
+                let str_id = program.get_str_id(&slot.name[..], name_cache) as i16;
+                try!(program.add_instruction(method_idx, Inst::GetSlot(str_id)));
+            }
+            Exp::SetSlot(ref setslot) => {
+                setslot.exp.compile(env, program, method_idx, name_cache);
+                setslot.value.compile(env, program, method_idx, name_cache);
+                let str_id = program.get_str_id(&setslot.name[..], name_cache) as i16;
+                try!(program.add_instruction(method_idx, Inst::SetSlot(str_id)));
+                try!(program.add_instruction(method_idx, Inst::Drop));
+            }
             Exp::CallSlot(ref callslot) => {}
             Exp::Call(ref call) => {}
             Exp::Set(ref set) => {}
@@ -114,13 +137,13 @@ impl SlotStmt {
     pub fn compile(&self,
                    env: &mut Option<HashMap<String, i32>>,
                    program: &mut Program,
-                   method_idx: i32,
+                   method_idx: usize,
                    name_cache: &mut HashMap<String, usize>)
-                   -> io::Result<()> {
+                   -> io::Result<i16> {
         match *self {
             SlotStmt::Var(ref var) => {}
             SlotStmt::Method(ref met) => {}
         }
-        Ok(())
+        Ok(0)
     }
 }
