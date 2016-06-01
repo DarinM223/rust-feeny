@@ -8,32 +8,6 @@ use std::io::ErrorKind::*;
 use std::mem;
 use std::rc::Rc;
 
-/// Similar to unwrap() but doesn't move value and resolves to a reference
-macro_rules! get_ref {
-    ($data:expr) => (match $data {
-        Some(ref val) => val,
-        None => panic!("Optional cannot be None"),
-    });
-}
-
-/// Similar to unwrap() but doesn't move value and resolves to a mutable reference
-macro_rules! get_mut_ref {
-    ($data:expr) => (match $data {
-        Some(ref mut val) => val,
-        None => panic!("Optional cannot be None"),
-    });
-}
-
-/// Retrieves a string from the program values given an index or returns an Err
-macro_rules! get_str_val {
-    ($index:expr, $program:expr, $inst:expr) => (match $program.values.get($index as usize) {
-        Some(&Value::Str(ref s)) => s.clone(),
-        _ => return Err(io::Error::new(InvalidData,
-                                       format!("{:?}: Invalid index when retrieving string",
-                                               $inst))),
-    });
-}
-
 /// Interprets the bytecode structure
 pub fn interpret_bc(program: Program) -> io::Result<()> {
     let mut vm = try!(VM::new(&program));

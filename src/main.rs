@@ -2,6 +2,9 @@
 extern crate log;
 extern crate env_logger;
 
+#[macro_use]
+pub mod macros;
+
 pub mod ast;
 pub mod bytecode;
 pub mod compiler;

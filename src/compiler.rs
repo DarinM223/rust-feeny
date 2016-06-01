@@ -73,18 +73,18 @@ impl Exp {
             Exp::Printf(ref printf) => {
                 let format_id = program.get_str_id(&printf.format[..], name_cache);
                 for exp in &printf.exps {
-                    exp.compile(env, program, method_idx, name_cache);
+                    try!(exp.compile(env, program, method_idx, name_cache));
                 }
                 try!(program.add_instruction(method_idx,
                                              Inst::Printf(format_id as i16, printf.nexps as u8)));
             }
             Exp::Array(ref arr) => {
-                arr.length.compile(env, program, method_idx, name_cache);
-                arr.init.compile(env, program, method_idx, name_cache);
-                program.add_instruction(method_idx, Inst::Array);
+                try!(arr.length.compile(env, program, method_idx, name_cache));
+                try!(arr.init.compile(env, program, method_idx, name_cache));
+                try!(program.add_instruction(method_idx, Inst::Array));
             }
             Exp::Object(ref obj) => {
-                obj.parent.compile(env, program, method_idx, name_cache);
+                try!(obj.parent.compile(env, program, method_idx, name_cache));
                 let mut class_val = ClassValue { slots: vec![] };
                 for slot in &obj.slots {
                     class_val.slots.push(try!(slot.compile(env, program, method_idx, name_cache)));
@@ -94,20 +94,43 @@ impl Exp {
                 try!(program.add_instruction(method_idx, Inst::Object(class_id as i16)));
             }
             Exp::Slot(ref slot) => {
-                slot.exp.compile(env, program, method_idx, name_cache);
+                try!(slot.exp.compile(env, program, method_idx, name_cache));
                 let str_id = program.get_str_id(&slot.name[..], name_cache) as i16;
                 try!(program.add_instruction(method_idx, Inst::GetSlot(str_id)));
             }
             Exp::SetSlot(ref setslot) => {
-                setslot.exp.compile(env, program, method_idx, name_cache);
-                setslot.value.compile(env, program, method_idx, name_cache);
+                try!(setslot.exp.compile(env, program, method_idx, name_cache));
+                try!(setslot.value.compile(env, program, method_idx, name_cache));
                 let str_id = program.get_str_id(&setslot.name[..], name_cache) as i16;
                 try!(program.add_instruction(method_idx, Inst::SetSlot(str_id)));
                 try!(program.add_instruction(method_idx, Inst::Drop));
             }
-            Exp::CallSlot(ref callslot) => {}
-            Exp::Call(ref call) => {}
-            Exp::Set(ref set) => {}
+            Exp::CallSlot(ref callslot) => {
+                try!(callslot.exp.compile(env, program, method_idx, name_cache));
+                for arg in &callslot.args {
+                    try!(arg.compile(env, program, method_idx, name_cache));
+                }
+
+                let str_id = program.get_str_id(&callslot.name[..], name_cache);
+                let nargs = callslot.nargs as u8 + 1;
+                try!(program.add_instruction(method_idx, Inst::CallSlot(str_id as i16, nargs)));
+            }
+            Exp::Call(ref call) => {
+                for arg in &call.args {
+                    try!(arg.compile(env, program, method_idx, name_cache));
+                }
+                let str_id = program.get_str_id(&call.name[..], name_cache) as i16;
+                try!(program.add_instruction(method_idx, Inst::Call(str_id, call.nargs as u8)));
+            }
+            Exp::Set(ref set) => {
+                try!(set.exp.compile(env, program, method_idx, name_cache));
+                let inst = match clone_from_opt_map_ref!(env, &set.name) {
+                    Some(id) => Inst::SetLocal(id as i16),
+                    None => Inst::SetGlobal(program.get_str_id(&set.name[..], name_cache) as i16),
+                };
+                try!(program.add_instruction(method_idx, inst));
+                try!(program.add_instruction(method_idx, Inst::Drop));
+            }
             Exp::If(ref if_exp) => {}
             Exp::While(ref while_exp) => {}
             Exp::Ref(ref ref_exp) => {}
