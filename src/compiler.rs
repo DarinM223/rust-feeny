@@ -14,8 +14,9 @@ pub fn compile(stmt: &ScopeStmt) -> io::Result<Program> {
         slots: Vec::new(),
         entry: 0,
         null_idx: 0,
+        label_count: 0,
     };
-    let entry = program.entry as i32;
+    let entry = program.entry as usize;
     program.null_idx = program.add_value(Value::Null) as i16;
 
     try!(stmt.compile(&mut None, &mut program, entry, &mut HashMap::new()));
@@ -131,8 +132,63 @@ impl Exp {
                 try!(program.add_instruction(method_idx, inst));
                 try!(program.add_instruction(method_idx, Inst::Drop));
             }
-            Exp::If(ref if_exp) => {}
-            Exp::While(ref while_exp) => {}
+            Exp::If(ref if_exp) => {
+                let on_true_str = format!("LABEL_{}", program.label_count);
+                let on_false_str = format!("LABEL_{}", program.label_count + 1);
+
+                // Add the labels to jump to
+                let on_true = program.get_str_id(&on_true_str[..], name_cache);
+                let on_false = program.get_str_id(&on_false_str[..], name_cache);
+                program.label_count += 2;
+
+                // Compile predicate
+                try!(if_exp.pred.compile(env, program, method_idx, name_cache));
+
+                // If predicate is true go to on_true:
+                try!(program.add_instruction(method_idx, Inst::Branch(on_true as i16)));
+
+                // Otherwise run instructions in else block then jump to on_false:
+                try!(if_exp.alt.compile(env, program, method_idx, name_cache));
+                try!(program.add_instruction(method_idx, Inst::Goto(on_false as i16)));
+
+                // on_true: Run instructions in if block
+                try!(program.add_instruction(method_idx, Inst::Label(on_true as i16)));
+                try!(if_exp.conseq.compile(env, program, method_idx, name_cache));
+
+                // on_false:
+                try!(program.add_instruction(method_idx, Inst::Label(on_false as i16)));
+            }
+            Exp::While(ref while_exp) => {
+                let start_str = format!("LABEL_{}", program.label_count);
+                let body_str = format!("LABEL_{}", program.label_count + 1);
+                let end_str = format!("LABEL_{}", program.label_count + 2);
+
+                // Add the labels to jump to
+                let start = program.get_str_id(&start_str[..], name_cache);
+                let body = program.get_str_id(&body_str[..], name_cache);
+                let end = program.get_str_id(&end_str[..], name_cache);
+                program.label_count += 3;
+
+                // start:
+                try!(program.add_instruction(method_idx, Inst::Label(start as i16)));
+
+                // Compile predicate
+                try!(while_exp.pred.compile(env, program, method_idx, name_cache));
+
+                // If predicate is true go to body:
+                try!(program.add_instruction(method_idx, Inst::Branch(body as i16)));
+
+                // Otherwise go to end:
+                try!(program.add_instruction(method_idx, Inst::Goto(end as i16)));
+
+                // body: evaluate instructions in body then loop to start:
+                try!(program.add_instruction(method_idx, Inst::Label(body as i16)));
+                try!(while_exp.body.compile(env, program, method_idx, name_cache));
+                program.add_instruction(method_idx, Inst::Goto(start as i16));
+
+                // end:
+                try!(program.add_instruction(method_idx, Inst::Label(end as i16)));
+            }
             Exp::Ref(ref ref_exp) => {}
         }
         Ok(())
@@ -143,7 +199,7 @@ impl ScopeStmt {
     pub fn compile(&self,
                    env: &mut Option<HashMap<String, i32>>,
                    program: &mut Program,
-                   method_idx: i32,
+                   method_idx: usize,
                    name_cache: &mut HashMap<String, usize>)
                    -> io::Result<()> {
         match *self {

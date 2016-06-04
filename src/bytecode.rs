@@ -158,6 +158,7 @@ pub struct Program {
     pub slots: Vec<i16>,
     pub entry: i16,
     pub null_idx: i16,
+    pub label_count: i32,
 }
 
 impl Program {
@@ -168,6 +169,7 @@ impl Program {
             slots: try!(read_slots(f)),
             entry: try!(read_short(f)),
             null_idx: 0,
+            label_count: 0,
         })
     }
 
