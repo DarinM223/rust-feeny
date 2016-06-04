@@ -1,13 +1,10 @@
 use ast::{Exp, ScopeStmt, SlotStmt};
-use bytecode::{ClassValue, Program, Inst, Value};
+use bytecode::{ClassValue, MethodValue, Program, Inst, Value};
 use std::collections::HashMap;
 use std::io;
 
 /// Compiles an AST structure into bytecode
 pub fn compile(stmt: &ScopeStmt) -> io::Result<Program> {
-    use std::io::Error;
-    use std::io::ErrorKind::*;
-
     // TODO(DarinM223): initialize program
     let mut program = Program {
         values: Vec::new(),
@@ -184,12 +181,19 @@ impl Exp {
                 // body: evaluate instructions in body then loop to start:
                 try!(program.add_instruction(method_idx, Inst::Label(body as i16)));
                 try!(while_exp.body.compile(env, program, method_idx, name_cache));
-                program.add_instruction(method_idx, Inst::Goto(start as i16));
+                try!(program.add_instruction(method_idx, Inst::Goto(start as i16)));
 
                 // end:
                 try!(program.add_instruction(method_idx, Inst::Label(end as i16)));
             }
-            Exp::Ref(ref ref_exp) => {}
+            Exp::Ref(ref refname) => {
+                let inst = match clone_from_opt_map_ref!(env, refname) {
+                    Some(id) => Inst::GetLocal(id as i16),
+                    None => Inst::GetGlobal(program.get_str_id(refname, name_cache) as i16),
+                };
+
+                try!(program.add_instruction(method_idx, inst));
+            }
         }
         Ok(())
     }
@@ -220,9 +224,31 @@ impl SlotStmt {
                    name_cache: &mut HashMap<String, usize>)
                    -> io::Result<i16> {
         match *self {
-            SlotStmt::Var(ref var) => {}
-            SlotStmt::Method(ref met) => {}
+            SlotStmt::Var(ref var) => {
+                let slot_name = program.get_str_id(&var.name[..], name_cache);
+                let slot_id = program.add_value(Value::Slot(slot_name as i16));
+                try!(var.exp.compile(env, program, method_idx, name_cache));
+                Ok(slot_id as i16)
+            }
+            SlotStmt::Method(ref met) => {
+                let name = program.get_str_id(&met.name[..], name_cache) as i16;
+                let new_method_idx = program.add_value(Value::Method(MethodValue {
+                    code: Vec::new(),
+                    name: name,
+                    nargs: met.nargs as u8,
+                    nlocals: 0,
+                }));
+
+                let mut new_env = HashMap::new();
+                new_env.insert("this".to_owned(), 0);
+                for (i, arg) in met.args.iter().enumerate() {
+                    new_env.insert(arg.clone(), (i + 1) as i32);
+                }
+
+                try!(met.body.compile(&mut Some(new_env), program, new_method_idx, name_cache));
+                try!(program.add_instruction(new_method_idx, Inst::Return));
+                Ok(new_method_idx as i16)
+            }
         }
-        Ok(0)
     }
 }
