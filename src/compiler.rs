@@ -207,8 +207,46 @@ impl ScopeStmt {
                    name_cache: &mut HashMap<String, usize>)
                    -> io::Result<()> {
         match *self {
-            ScopeStmt::Var(ref var) => {}
-            ScopeStmt::Fn(ref fun) => {}
+            ScopeStmt::Var(ref var) => {
+                if *env != None {
+                    if let Some(ref mut env) = *env {
+                        let id = *(env.values().max().unwrap()) + 1;
+                        env.insert(var.name.clone(), id);
+                    }
+                    let mid = method_idx;
+                    if let Some(&mut Value::Method(ref mut met)) = program.values.get_mut(mid) {
+                        met.nlocals += 1;
+                    }
+                    try!(var.exp.compile(env, program, method_idx, name_cache));
+
+                    let name_id = program.get_str_id(&var.name[..], name_cache) as i16;
+                    try!(program.add_instruction(method_idx, Inst::SetLocal(name_id)));
+                } else {
+                    let name_id = program.get_str_id(&var.name[..], name_cache);
+                    let slot_id = program.add_value(Value::Slot(name_id as i16));
+                    program.slots.push(slot_id as i16);
+                    try!(var.exp.compile(env, program, method_idx, name_cache));
+                    try!(program.add_instruction(method_idx, Inst::SetGlobal(name_id as i16)));
+                }
+
+                try!(program.add_instruction(method_idx, Inst::Drop));
+            }
+            ScopeStmt::Fn(ref fun) => {
+                let name_id = program.get_str_id(&fun.name[..], name_cache) as i16;
+                let new_method_id = program.add_value(Value::Method(MethodValue {
+                    code: Vec::new(),
+                    name: name_id,
+                    nargs: fun.nargs as u8,
+                    nlocals: 0,
+                }));
+                let mut new_env = HashMap::new();
+                for (i, arg) in fun.args.iter().enumerate() {
+                    new_env.insert(arg.clone(), i as i32);
+                }
+                try!(fun.body.compile(&mut Some(new_env), program, new_method_id, name_cache));
+                program.slots.push(new_method_id as i16);
+                try!(program.add_instruction(new_method_id, Inst::Return));
+            }
             ScopeStmt::Seq(ref seq) => {}
             ScopeStmt::Exp(ref exp) => {}
         }
@@ -232,7 +270,7 @@ impl SlotStmt {
             }
             SlotStmt::Method(ref met) => {
                 let name = program.get_str_id(&met.name[..], name_cache) as i16;
-                let new_method_idx = program.add_value(Value::Method(MethodValue {
+                let new_method_id = program.add_value(Value::Method(MethodValue {
                     code: Vec::new(),
                     name: name,
                     nargs: met.nargs as u8,
@@ -245,9 +283,9 @@ impl SlotStmt {
                     new_env.insert(arg.clone(), (i + 1) as i32);
                 }
 
-                try!(met.body.compile(&mut Some(new_env), program, new_method_idx, name_cache));
-                try!(program.add_instruction(new_method_idx, Inst::Return));
-                Ok(new_method_idx as i16)
+                try!(met.body.compile(&mut Some(new_env), program, new_method_id, name_cache));
+                try!(program.add_instruction(new_method_id, Inst::Return));
+                Ok(new_method_id as i16)
             }
         }
     }
