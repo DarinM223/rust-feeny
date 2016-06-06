@@ -5,11 +5,10 @@ use std::io;
 
 /// Compiles an AST structure into bytecode
 pub fn compile(stmt: &ScopeStmt) -> io::Result<Program> {
-    // TODO(DarinM223): initialize program
     let mut program = Program {
         values: Vec::new(),
         slots: Vec::new(),
-        entry: 0,
+        entry: 2,
         null_idx: 0,
         label_count: 0,
     };
@@ -247,8 +246,13 @@ impl ScopeStmt {
                 program.slots.push(new_method_id as i16);
                 try!(program.add_instruction(new_method_id, Inst::Return));
             }
-            ScopeStmt::Seq(ref seq) => {}
-            ScopeStmt::Exp(ref exp) => {}
+            ScopeStmt::Seq(ref seq) => {
+                try!(seq.a.compile(env, program, method_idx, name_cache));
+                try!(seq.b.compile(env, program, method_idx, name_cache));
+            }
+            ScopeStmt::Exp(ref exp) => {
+                try!(exp.compile(env, program, method_idx, name_cache));
+            }
         }
         Ok(())
     }

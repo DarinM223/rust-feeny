@@ -44,6 +44,25 @@ fn main() {
                     Err(err) => println!("{:?}", err),
                 }
             }
+            "bc_compile" => {
+                let stmt = ast::read_ast(path).unwrap();
+                stmt.print();
+
+                println!("");
+
+                let program = match compiler::compile(&stmt) {
+                    Ok(p) => p,
+                    Err(err) => {
+                        println!("{:?}", err);
+                        panic!(err);
+                    }
+                };
+
+                match vm::interpret_bc(program) {
+                    Ok(_) => println!("Program completed!"),
+                    Err(err) => println!("{:?}", err),
+                }
+            }
             _ => panic!("Unknown option (allowed options: ast/bc)"),
         }
     } else {
