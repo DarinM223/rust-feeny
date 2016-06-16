@@ -208,9 +208,12 @@ impl ScopeStmt {
         match *self {
             ScopeStmt::Var(ref var) => {
                 if *env != None {
-                    if let Some(ref mut env) = *env {
-                        let id = *(env.values().max().unwrap()) + 1;
-                        env.insert(var.name.clone(), id);
+                    match *env {
+                        Some(ref mut env) if env.len() > 1 => {
+                            let id = *(env.values().max().unwrap()) + 1;
+                            env.insert(var.name.clone(), id);
+                        }
+                        _ => {}
                     }
                     let mid = method_idx;
                     if let Some(&mut Value::Method(ref mut met)) = program.values.get_mut(mid) {
