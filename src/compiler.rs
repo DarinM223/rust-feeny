@@ -68,6 +68,7 @@ impl Exp {
             }
             Exp::Null => try!(program.add_instruction(method_idx, Inst::Lit(null_idx))),
             Exp::Printf(ref printf) => {
+                debug!("Printf: {} nexps: {}", printf.format, printf.nexps);
                 let format_id = program.get_str_id(&printf.format[..], name_cache);
                 for exp in &printf.exps {
                     try!(exp.compile(env, program, method_idx, name_cache));
@@ -76,11 +77,13 @@ impl Exp {
                                              Inst::Printf(format_id as i16, printf.nexps as u8)));
             }
             Exp::Array(ref arr) => {
+                debug!("Array: init: {:?} length: {:?}", arr.init, arr.length);
                 try!(arr.length.compile(env, program, method_idx, name_cache));
                 try!(arr.init.compile(env, program, method_idx, name_cache));
                 try!(program.add_instruction(method_idx, Inst::Array));
             }
             Exp::Object(ref obj) => {
+                debug!("Object: parent: {:?} nslots: {}", obj.parent, obj.nslots);
                 try!(obj.parent.compile(env, program, method_idx, name_cache));
                 let mut class_val = ClassValue { slots: vec![] };
                 for slot in &obj.slots {
@@ -91,11 +94,16 @@ impl Exp {
                 try!(program.add_instruction(method_idx, Inst::Object(class_id as i16)));
             }
             Exp::Slot(ref slot) => {
+                debug!("Slot: name: {} exp: {:?}", slot.name, slot.exp);
                 try!(slot.exp.compile(env, program, method_idx, name_cache));
                 let str_id = program.get_str_id(&slot.name[..], name_cache) as i16;
                 try!(program.add_instruction(method_idx, Inst::GetSlot(str_id)));
             }
             Exp::SetSlot(ref setslot) => {
+                debug!("Setting slot: name: {} exp: {:?} value: {:?}",
+                       setslot.name,
+                       setslot.exp,
+                       setslot.value);
                 try!(setslot.exp.compile(env, program, method_idx, name_cache));
                 try!(setslot.value.compile(env, program, method_idx, name_cache));
                 let str_id = program.get_str_id(&setslot.name[..], name_cache) as i16;
@@ -103,6 +111,10 @@ impl Exp {
                 try!(program.add_instruction(method_idx, Inst::Drop));
             }
             Exp::CallSlot(ref callslot) => {
+                debug!("Calling slot: name: {} exp: {:?} args: {:?}",
+                       callslot.name,
+                       callslot.exp,
+                       callslot.args);
                 try!(callslot.exp.compile(env, program, method_idx, name_cache));
                 for arg in &callslot.args {
                     try!(arg.compile(env, program, method_idx, name_cache));
@@ -113,6 +125,7 @@ impl Exp {
                 try!(program.add_instruction(method_idx, Inst::CallSlot(str_id as i16, nargs)));
             }
             Exp::Call(ref call) => {
+                debug!("Calling: name: {} args: {:?}", call.name, call.args);
                 for arg in &call.args {
                     try!(arg.compile(env, program, method_idx, name_cache));
                 }
@@ -120,6 +133,7 @@ impl Exp {
                 try!(program.add_instruction(method_idx, Inst::Call(str_id, call.nargs as u8)));
             }
             Exp::Set(ref set) => {
+                debug!("Setting: name: {} exp: {:?}", set.name, set.exp);
                 try!(set.exp.compile(env, program, method_idx, name_cache));
                 let inst = match clone_from_opt_map_ref!(env, &set.name) {
                     Some(id) => Inst::SetLocal(id as i16),
@@ -129,6 +143,10 @@ impl Exp {
                 try!(program.add_instruction(method_idx, Inst::Drop));
             }
             Exp::If(ref if_exp) => {
+                debug!("If: predicate: {:?} consequence: {:?} alternative: {:?}",
+                       if_exp.pred,
+                       if_exp.conseq,
+                       if_exp.alt);
                 let on_true_str = format!("LABEL_{}", program.label_count);
                 let on_false_str = format!("LABEL_{}", program.label_count + 1);
 
@@ -155,6 +173,9 @@ impl Exp {
                 try!(program.add_instruction(method_idx, Inst::Label(on_false as i16)));
             }
             Exp::While(ref while_exp) => {
+                debug!("While: predicate: {:?} body: {:?}",
+                       while_exp.pred,
+                       while_exp.body);
                 let start_str = format!("LABEL_{}", program.label_count);
                 let body_str = format!("LABEL_{}", program.label_count + 1);
                 let end_str = format!("LABEL_{}", program.label_count + 2);
@@ -186,6 +207,7 @@ impl Exp {
                 try!(program.add_instruction(method_idx, Inst::Label(end as i16)));
             }
             Exp::Ref(ref refname) => {
+                debug!("Ref: {:?}", refname);
                 let inst = match clone_from_opt_map_ref!(env, refname) {
                     Some(id) => Inst::GetLocal(id as i16),
                     None => Inst::GetGlobal(program.get_str_id(refname, name_cache) as i16),
@@ -207,6 +229,7 @@ impl ScopeStmt {
                    -> io::Result<()> {
         match *self {
             ScopeStmt::Var(ref var) => {
+                debug!("Var: name: {:?} exp: {:?}", var.name, var.exp);
                 if *env != None {
                     match *env {
                         Some(ref mut env) if env.len() > 1 => {
@@ -234,6 +257,10 @@ impl ScopeStmt {
                 try!(program.add_instruction(method_idx, Inst::Drop));
             }
             ScopeStmt::Fn(ref fun) => {
+                debug!("Scope Fn: name: {:?} args: {:?} body: {:?}",
+                       fun.name,
+                       fun.args,
+                       fun.body);
                 let name_id = program.get_str_id(&fun.name[..], name_cache) as i16;
                 let new_method_id = program.add_value(Value::Method(MethodValue {
                     code: Vec::new(),
@@ -250,10 +277,12 @@ impl ScopeStmt {
                 try!(program.add_instruction(new_method_id, Inst::Return));
             }
             ScopeStmt::Seq(ref seq) => {
+                debug!("Scope Seq: A: {:?} B: {:?}", seq.a, seq.b);
                 try!(seq.a.compile(env, program, method_idx, name_cache));
                 try!(seq.b.compile(env, program, method_idx, name_cache));
             }
             ScopeStmt::Exp(ref exp) => {
+                debug!("Scope Exp: {:?}", exp);
                 try!(exp.compile(env, program, method_idx, name_cache));
             }
         }
@@ -270,12 +299,17 @@ impl SlotStmt {
                    -> io::Result<i16> {
         match *self {
             SlotStmt::Var(ref var) => {
+                debug!("Slot var: name: {:?} exp: {:?}", var.name, var.exp);
                 let slot_name = program.get_str_id(&var.name[..], name_cache);
                 let slot_id = program.add_value(Value::Slot(slot_name as i16));
                 try!(var.exp.compile(env, program, method_idx, name_cache));
                 Ok(slot_id as i16)
             }
             SlotStmt::Method(ref met) => {
+                debug!("Slot method: name: {:?} args: {:?} body: {:?}",
+                       met.name,
+                       met.args,
+                       met.body);
                 let name = program.get_str_id(&met.name[..], name_cache) as i16;
                 let new_method_id = program.add_value(Value::Method(MethodValue {
                     code: Vec::new(),
