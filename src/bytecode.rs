@@ -6,7 +6,7 @@ use std::mem::transmute;
 /// Reads a path to an bytecode file, parses the file contents into
 /// the bytecode structure, and returns the program
 pub fn load_bytecode(path: &str) -> io::Result<Program> {
-    let mut file = try!(File::open(path));
+    let mut file = File::open(path)?;
     Program::read(&mut file)
 }
 
@@ -24,21 +24,21 @@ pub enum Value {
 impl Value {
     /// Reads a value from a file
     pub fn read(f: &mut File) -> io::Result<Value> {
-        let tag = try!(read_byte(f));
+        let tag = read_byte(f)?;
         Ok(match ValTag::from_u8(tag) {
-            ValTag::Int => Value::Int(try!(read_int(f))),
+            ValTag::Int => Value::Int(read_int(f)?),
             ValTag::Null => Value::Null,
-            ValTag::Str => Value::Str(try!(read_string(f))),
+            ValTag::Str => Value::Str(read_string(f)?),
             ValTag::Method => {
                 Value::Method(MethodValue {
-                    name: try!(read_short(f)),
-                    nargs: try!(read_byte(f)),
-                    nlocals: try!(read_short(f)),
-                    code: try!(read_code(f)),
+                    name: read_short(f)?,
+                    nargs: read_byte(f)?,
+                    nlocals: read_short(f)?,
+                    code: read_code(f)?,
                 })
             }
-            ValTag::Slot => Value::Slot(try!(read_short(f))),
-            ValTag::Class => Value::Class(ClassValue { slots: try!(read_slots(f)) }),
+            ValTag::Slot => Value::Slot(read_short(f)?),
+            ValTag::Class => Value::Class(ClassValue { slots: read_slots(f)? }),
         })
     }
 
@@ -106,23 +106,23 @@ pub enum Inst {
 impl Inst {
     /// Reads an instruction from a file
     pub fn read(f: &mut File) -> io::Result<Inst> {
-        let op = try!(read_byte(f));
+        let op = read_byte(f)?;
         Ok(match OpCode::from_u8(op) {
-            OpCode::Label => Inst::Label(try!(read_short(f))),
-            OpCode::Lit => Inst::Lit(try!(read_short(f))),
-            OpCode::Printf => Inst::Printf(try!(read_short(f)), try!(read_byte(f))),
+            OpCode::Label => Inst::Label(read_short(f)?),
+            OpCode::Lit => Inst::Lit(read_short(f)?),
+            OpCode::Printf => Inst::Printf(read_short(f)?, read_byte(f)?),
             OpCode::Array => Inst::Array,
-            OpCode::Object => Inst::Object(try!(read_short(f))),
-            OpCode::GetSlot => Inst::GetSlot(try!(read_short(f))),
-            OpCode::SetSlot => Inst::SetSlot(try!(read_short(f))),
-            OpCode::CallSlot => Inst::CallSlot(try!(read_short(f)), try!(read_byte(f))),
-            OpCode::Call => Inst::Call(try!(read_short(f)), try!(read_byte(f))),
-            OpCode::SetLocal => Inst::SetLocal(try!(read_short(f))),
-            OpCode::GetLocal => Inst::GetLocal(try!(read_short(f))),
-            OpCode::SetGlobal => Inst::SetGlobal(try!(read_short(f))),
-            OpCode::GetGlobal => Inst::GetGlobal(try!(read_short(f))),
-            OpCode::Branch => Inst::Branch(try!(read_short(f))),
-            OpCode::Goto => Inst::Goto(try!(read_short(f))),
+            OpCode::Object => Inst::Object(read_short(f)?),
+            OpCode::GetSlot => Inst::GetSlot(read_short(f)?),
+            OpCode::SetSlot => Inst::SetSlot(read_short(f)?),
+            OpCode::CallSlot => Inst::CallSlot(read_short(f)?, read_byte(f)?),
+            OpCode::Call => Inst::Call(read_short(f)?, read_byte(f)?),
+            OpCode::SetLocal => Inst::SetLocal(read_short(f)?),
+            OpCode::GetLocal => Inst::GetLocal(read_short(f)?),
+            OpCode::SetGlobal => Inst::SetGlobal(read_short(f)?),
+            OpCode::GetGlobal => Inst::GetGlobal(read_short(f)?),
+            OpCode::Branch => Inst::Branch(read_short(f)?),
+            OpCode::Goto => Inst::Goto(read_short(f)?),
             OpCode::Return => Inst::Return,
             OpCode::Drop => Inst::Drop,
         })
@@ -165,9 +165,9 @@ impl Program {
     /// Reads a program from a file
     pub fn read(f: &mut File) -> io::Result<Program> {
         Ok(Program {
-            values: try!(read_values(f)),
-            slots: try!(read_slots(f)),
-            entry: try!(read_short(f)),
+            values: read_values(f)?,
+            slots: read_slots(f)?,
+            entry: read_short(f)?,
             null_idx: 0,
             label_count: 0,
         })
@@ -256,26 +256,26 @@ fn read_byte(f: &mut File) -> io::Result<u8> {
 }
 
 fn read_short(f: &mut File) -> io::Result<i16> {
-    let b1 = try!(read_byte(f)) as i16;
-    let b2 = try!(read_byte(f)) as i16;
+    let b1 = read_byte(f)? as i16;
+    let b2 = read_byte(f)? as i16;
 
     Ok(b1 + (b2 << 8))
 }
 
 fn read_int(f: &mut File) -> io::Result<i32> {
-    let b1 = try!(read_byte(f)) as i32;
-    let b2 = try!(read_byte(f)) as i32;
-    let b3 = try!(read_byte(f)) as i32;
-    let b4 = try!(read_byte(f)) as i32;
+    let b1 = read_byte(f)? as i32;
+    let b2 = read_byte(f)? as i32;
+    let b3 = read_byte(f)? as i32;
+    let b4 = read_byte(f)? as i32;
 
     Ok(b1 + (b2 << 8) + (b3 << 16) + (b4 << 24))
 }
 
 fn read_string(f: &mut File) -> io::Result<String> {
-    let len = try!(read_int(f));
+    let len = read_int(f)?;
     let mut buf = Vec::with_capacity(len as usize);
     for _ in 0..len {
-        buf.push(try!(read_byte(f)));
+        buf.push(read_byte(f)?);
     }
 
     String::from_utf8(buf).map_err(|_| {
@@ -285,28 +285,28 @@ fn read_string(f: &mut File) -> io::Result<String> {
 }
 
 fn read_code(f: &mut File) -> io::Result<Vec<Inst>> {
-    let n = try!(read_int(f));
+    let n = read_int(f)?;
     let mut vec = Vec::with_capacity(n as usize);
     for _ in 0..n {
-        vec.push(try!(Inst::read(f)));
+        vec.push(Inst::read(f)?);
     }
     Ok(vec)
 }
 
 fn read_slots(f: &mut File) -> io::Result<Vec<i16>> {
-    let n = try!(read_short(f));
+    let n = read_short(f)?;
     let mut vec = Vec::with_capacity(n as usize);
     for _ in 0..n {
-        vec.push(try!(read_short(f)));
+        vec.push(read_short(f)?);
     }
     Ok(vec)
 }
 
 fn read_values(f: &mut File) -> io::Result<Vec<Value>> {
-    let n = try!(read_short(f));
+    let n = read_short(f)?;
     let mut vec = Vec::with_capacity(n as usize);
     for _ in 0..n {
-        vec.push(try!(Value::read(f)));
+        vec.push(Value::read(f)?);
     }
     Ok(vec)
 }

@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 /// Interprets an AST of a program
 pub fn interpret(stmt: ScopeStmt) -> io::Result<()> {
-    try!(stmt.eval(&mut EnvObj::new(None), &mut Obj::Null));
+    stmt.eval(&mut EnvObj::new(None), &mut Obj::Null)?;
     Ok(())
 }
 
@@ -24,7 +24,7 @@ impl Exp {
                 let mut counter = 0;
                 for ch in printf.format.chars() {
                     if ch == '~' {
-                        let res = try!(printf.exps[counter].eval(genv, env));
+                        let res = printf.exps[counter].eval(genv, env)?;
                         if let Obj::Int(obj) = res {
                             print!("{}", obj.value);
                         } else {
@@ -38,21 +38,20 @@ impl Exp {
                 Ok(Obj::Null)
             }
             Exp::Array(ref array) => {
-                let length = try!(array.length.eval(genv, env));
-                let init = try!(array.init.eval(genv, env));
+                let length = array.length.eval(genv, env)?;
+                let init = array.init.eval(genv, env)?;
                 Ok(Obj::Array(Rc::new(RefCell::new(ArrayObj::new(length, init)))))
             }
             Exp::Object(ref obj) => {
-                let mut env_obj = Obj::Env(Rc::new(RefCell::new(make_env_obj(Some(try!(obj.parent
-                    .eval(genv, env)))))));
+                let mut env_obj = Obj::Env(Rc::new(RefCell::new(make_env_obj(Some(obj.parent.eval(genv, env)?)))));
                 for slot in &obj.slots {
-                    let _ = slot.exec(genv, env, &mut env_obj);
+                    slot.exec(genv, env, &mut env_obj);
                 }
                 Ok(env_obj)
             }
             Exp::Slot(ref slot) => {
                 debug!("Getting slot: {}", &slot.name[..]);
-                let obj = try!(slot.exp.eval(genv, env));
+                let obj = slot.exp.eval(genv, env)?;
                 if let Obj::Env(env_obj) = obj {
                     let entry = env_obj.borrow().get(&slot.name[..]);
                     if let Some(Entry::Var(obj)) = entry {
@@ -66,8 +65,8 @@ impl Exp {
             }
             Exp::SetSlot(ref setslot) => {
                 debug!("Setting slot: {}", &setslot.name[..]);
-                let obj = try!(setslot.exp.eval(genv, env));
-                let value = try!(setslot.value.eval(genv, env));
+                let obj = setslot.exp.eval(genv, env)?;
+                let value = setslot.value.eval(genv, env)?;
                 if let Obj::Env(env_obj) = obj {
                     env_obj.borrow_mut().add(&setslot.name[..], Entry::Var(value));
                 } else {
@@ -78,10 +77,10 @@ impl Exp {
             }
             Exp::CallSlot(ref cs) => {
                 debug!("Calling slot: {}", &cs.name[..]);
-                let mut obj = try!(cs.exp.eval(genv, env));
+                let mut obj = cs.exp.eval(genv, env)?;
                 match obj {
                     Obj::Int(iexp) => {
-                        let other = match try!(cs.args[0].eval(genv, env)) {
+                        let other = match cs.args[0].eval(genv, env)? {
                             Obj::Int(i) => i,
                             _ => panic!("Operand has to be an integer"),
                         };
@@ -104,12 +103,12 @@ impl Exp {
                         match &cs.name[..] {
                             "length" => Ok(Obj::Int(arr.borrow().length())),
                             "set" => {
-                                let name = try!(cs.args[0].eval(genv, env));
-                                let param = try!(cs.args[1].eval(genv, env));
+                                let name = cs.args[0].eval(genv, env)?;
+                                let param = cs.args[1].eval(genv, env)?;
                                 Ok(arr.borrow_mut().set(name, param))
                             }
                             "get" => {
-                                let name = try!(cs.args[0].eval(genv, env));
+                                let name = cs.args[0].eval(genv, env)?;
                                 Ok(arr.borrow().get(name).unwrap_or(Obj::Null))
                             }
                             _ => Err(Error::new(InvalidInput, "Invalid slot")),
@@ -128,7 +127,7 @@ impl Exp {
 
                             let mut new_env = EnvObj::new(None);
                             for (i, arg) in cs.args.iter().enumerate() {
-                                new_env.add(&args[i][..], Entry::Var(try!(arg.eval(genv, env))));
+                                new_env.add(&args[i][..], Entry::Var(arg.eval(genv, env)?));
                             }
                             new_env.add("this", Entry::Var(Obj::Env(ent.clone())));
 
@@ -153,13 +152,13 @@ impl Exp {
 
                 let mut new_env = EnvObj::new(None);
                 for (i, arg) in call.args.iter().enumerate() {
-                    new_env.add(&args[i][..], Entry::Var(try!(arg.eval(genv, env))));
+                    new_env.add(&args[i][..], Entry::Var(arg.eval(genv, env)?));
                 }
 
                 fun.eval(genv, &mut Obj::Env(Rc::new(RefCell::new(new_env))))
             }
             Exp::Set(ref set) => {
-                let res = try!(set.exp.eval(genv, env));
+                let res = set.exp.eval(genv, env)?;
                 let ent = get_entry(&set.name[..], genv, env);
 
                 match ent {
@@ -171,15 +170,15 @@ impl Exp {
                 Ok(Obj::Null)
             }
             Exp::If(ref iexp) => {
-                let pred = try!(iexp.pred.eval(genv, env));
+                let pred = iexp.pred.eval(genv, env)?;
                 match pred {
                     Obj::Null => iexp.alt.eval(genv, env),
                     _ => iexp.conseq.eval(genv, env),
                 }
             }
             Exp::While(ref wexp) => {
-                while let Obj::Int(_) = try!(wexp.pred.eval(genv, env)) {
-                    try!(wexp.body.eval(genv, env));
+                while let Obj::Int(_) = wexp.pred.eval(genv, env)? {
+                    wexp.body.eval(genv, env)?;
                 }
                 Ok(Obj::Null)
             }
@@ -205,7 +204,7 @@ impl SlotStmt {
         if let Obj::Env(ref mut env_obj) = *obj {
             match *self {
                 SlotStmt::Var(ref var) => {
-                    let var_exp = try!(var.exp.eval(genv, env));
+                    let var_exp = var.exp.eval(genv, env)?;
                     env_obj.borrow_mut().add(&var.name[..], Entry::Var(var_exp));
                 }
                 SlotStmt::Method(ref met) => {
@@ -227,7 +226,7 @@ impl ScopeStmt {
         match *self {
             ScopeStmt::Var(ref var) => {
                 debug!("Var: {}", &var.name[..]);
-                let entry_obj = try!(var.exp.eval(genv, env));
+                let entry_obj = var.exp.eval(genv, env)?;
                 if let Obj::Env(ref mut env_obj) = *env {
                     env_obj.borrow_mut().add(&var.name[..], Entry::Var(entry_obj));
                 } else {
@@ -242,10 +241,10 @@ impl ScopeStmt {
                 Ok(Obj::Null)
             }
             ScopeStmt::Seq(ref seq) => {
-                try!(seq.a.eval(genv, env));
-                Ok(try!(seq.b.eval(genv, env)))
+                seq.a.eval(genv, env)?;
+                Ok(seq.b.eval(genv, env)?)
             }
-            ScopeStmt::Exp(ref exp) => Ok(try!(exp.eval(genv, env))),
+            ScopeStmt::Exp(ref exp) => Ok(exp.eval(genv, env)?),
         }
     }
 }

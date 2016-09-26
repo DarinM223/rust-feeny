@@ -6,7 +6,7 @@ use std::mem::transmute;
 /// Reads a path to an AST file, parses the file contents into
 /// the AST, and returns the root ScopeStmt
 pub fn read_ast(path: String) -> io::Result<ScopeStmt> {
-    let mut file = try!(File::open(path));
+    let mut file = File::open(path)?;
     ScopeStmt::read(&mut file)
 }
 
@@ -112,14 +112,14 @@ impl Exp {
 
     /// Reads an expression from a file
     pub fn read(f: &mut File) -> io::Result<Exp> {
-        let tag = try!(read_int(f));
+        let tag = read_int(f)?;
         match AstTag::from_i32(tag) {
-            AstTag::IntExp => Ok(Exp::Int(try!(read_int(f)))),
+            AstTag::IntExp => Ok(Exp::Int(read_int(f)?)),
             AstTag::NullExp => Ok(Exp::Null),
             AstTag::PrintfExp => {
-                let format = try!(read_string(f));
-                let nexps = try!(read_int(f));
-                let exps = try!(read_exps(f, nexps));
+                let format = read_string(f)?;
+                let nexps = read_int(f)?;
+                let exps = read_exps(f, nexps)?;
 
                 Ok(Exp::Printf(PrintfExp {
                     format: format,
@@ -128,8 +128,8 @@ impl Exp {
                 }))
             }
             AstTag::ArrayExp => {
-                let length = try!(Exp::read(f));
-                let init = try!(Exp::read(f));
+                let length = Exp::read(f)?;
+                let init = Exp::read(f)?;
 
                 Ok(Exp::Array(Box::new(ArrayExp {
                     length: length,
@@ -137,9 +137,9 @@ impl Exp {
                 })))
             }
             AstTag::ObjectExp => {
-                let parent = try!(Exp::read(f));
-                let nslots = try!(read_int(f));
-                let slots = try!(read_slots(f, nslots));
+                let parent = Exp::read(f)?;
+                let nslots = read_int(f)?;
+                let slots = read_slots(f, nslots)?;
 
                 Ok(Exp::Object(Box::new(ObjectExp {
                     parent: parent,
@@ -148,8 +148,8 @@ impl Exp {
                 })))
             }
             AstTag::SlotExp => {
-                let name = try!(read_string(f));
-                let exp = try!(Exp::read(f));
+                let name = read_string(f)?;
+                let exp = Exp::read(f)?;
 
                 Ok(Exp::Slot(Box::new(SlotExp {
                     name: name,
@@ -157,9 +157,9 @@ impl Exp {
                 })))
             }
             AstTag::SetSlotExp => {
-                let name = try!(read_string(f));
-                let exp = try!(Exp::read(f));
-                let value = try!(Exp::read(f));
+                let name = read_string(f)?;
+                let exp = Exp::read(f)?;
+                let value = Exp::read(f)?;
 
                 Ok(Exp::SetSlot(Box::new(SetSlotExp {
                     name: name,
@@ -168,10 +168,10 @@ impl Exp {
                 })))
             }
             AstTag::CallSlotExp => {
-                let name = try!(read_string(f));
-                let exp = try!(Exp::read(f));
-                let nargs = try!(read_int(f));
-                let args = try!(read_exps(f, nargs));
+                let name = read_string(f)?;
+                let exp = Exp::read(f)?;
+                let nargs = read_int(f)?;
+                let args = read_exps(f, nargs)?;
 
                 Ok(Exp::CallSlot(Box::new(CallSlotExp {
                     name: name,
@@ -181,9 +181,9 @@ impl Exp {
                 })))
             }
             AstTag::CallExp => {
-                let name = try!(read_string(f));
-                let nargs = try!(read_int(f));
-                let args = try!(read_exps(f, nargs));
+                let name = read_string(f)?;
+                let nargs = read_int(f)?;
+                let args = read_exps(f, nargs)?;
 
                 Ok(Exp::Call(CallExp {
                     name: name,
@@ -192,8 +192,8 @@ impl Exp {
                 }))
             }
             AstTag::SetExp => {
-                let name = try!(read_string(f));
-                let exp = try!(Exp::read(f));
+                let name = read_string(f)?;
+                let exp = Exp::read(f)?;
 
                 Ok(Exp::Set(Box::new(SetExp {
                     name: name,
@@ -201,9 +201,9 @@ impl Exp {
                 })))
             }
             AstTag::IfExp => {
-                let pred = try!(Exp::read(f));
-                let conseq = try!(ScopeStmt::read(f));
-                let alt = try!(ScopeStmt::read(f));
+                let pred = Exp::read(f)?;
+                let conseq = ScopeStmt::read(f)?;
+                let alt = ScopeStmt::read(f)?;
 
                 Ok(Exp::If(Box::new(IfExp {
                     pred: pred,
@@ -212,15 +212,15 @@ impl Exp {
                 })))
             }
             AstTag::WhileExp => {
-                let pred = try!(Exp::read(f));
-                let body = try!(ScopeStmt::read(f));
+                let pred = Exp::read(f)?;
+                let body = ScopeStmt::read(f)?;
 
                 Ok(Exp::While(Box::new(WhileExp {
                     pred: pred,
                     body: body,
                 })))
             }
-            AstTag::RefExp => Ok(Exp::Ref(try!(read_string(f)))),
+            AstTag::RefExp => Ok(Exp::Ref(read_string(f)?)),
             _ => Err(io::Error::new(io::ErrorKind::NotFound, "Invalid expression type")),
         }
     }
@@ -258,12 +258,12 @@ impl SlotStmt {
 
     /// Reads a slot statement from a file
     pub fn read(f: &mut File) -> io::Result<SlotStmt> {
-        let tag = try!(read_int(f));
+        let tag = read_int(f)?;
 
         match AstTag::from_i32(tag) {
             AstTag::VarStmt => {
-                let name = try!(read_string(f));
-                let exp = try!(Exp::read(f));
+                let name = read_string(f)?;
+                let exp = Exp::read(f)?;
 
                 Ok(SlotStmt::Var(SlotVar {
                     name: name,
@@ -271,10 +271,10 @@ impl SlotStmt {
                 }))
             }
             AstTag::FnStmt => {
-                let name = try!(read_string(f));
-                let nargs = try!(read_int(f));
-                let args = try!(read_strings(f, nargs));
-                let body = try!(ScopeStmt::read(f));
+                let name = read_string(f)?;
+                let nargs = read_int(f)?;
+                let args = read_strings(f, nargs)?;
+                let body = ScopeStmt::read(f)?;
 
                 Ok(SlotStmt::Method(SlotMethod {
                     name: name,
@@ -328,12 +328,12 @@ impl ScopeStmt {
 
     /// Reads a scope statement from a file
     pub fn read(f: &mut File) -> io::Result<ScopeStmt> {
-        let tag = try!(read_int(f));
+        let tag = read_int(f)?;
 
         match AstTag::from_i32(tag) {
             AstTag::VarStmt => {
-                let name = try!(read_string(f));
-                let exp = try!(Exp::read(f));
+                let name = read_string(f)?;
+                let exp = Exp::read(f)?;
 
                 Ok(ScopeStmt::Var(ScopeVar {
                     name: name,
@@ -341,10 +341,10 @@ impl ScopeStmt {
                 }))
             }
             AstTag::FnStmt => {
-                let name = try!(read_string(f));
-                let nargs = try!(read_int(f));
-                let args = try!(read_strings(f, nargs));
-                let body = try!(ScopeStmt::read(f));
+                let name = read_string(f)?;
+                let nargs = read_int(f)?;
+                let args = read_strings(f, nargs)?;
+                let body = ScopeStmt::read(f)?;
 
                 Ok(ScopeStmt::Fn(Box::new(ScopeFn {
                     name: name,
@@ -354,12 +354,12 @@ impl ScopeStmt {
                 })))
             }
             AstTag::SeqStmt => {
-                let a = try!(ScopeStmt::read(f));
-                let b = try!(ScopeStmt::read(f));
+                let a = ScopeStmt::read(f)?;
+                let b = ScopeStmt::read(f)?;
 
                 Ok(ScopeStmt::Seq(Box::new(ScopeSeq { a: a, b: b })))
             }
-            AstTag::ExpStmt => Ok(ScopeStmt::Exp(try!(Exp::read(f)))),
+            AstTag::ExpStmt => Ok(ScopeStmt::Exp(Exp::read(f)?)),
             _ => Err(io::Error::new(io::ErrorKind::NotFound, "Invalid scope type")),
         }
     }
@@ -504,22 +504,22 @@ impl AstTag {
 
 fn read_int(f: &mut File) -> io::Result<i32> {
     let mut buf = [0; 4];
-    let _ = try!(f.read(&mut buf));
+    f.read(&mut buf)?;
     let (b1, b2, b3, b4) = (buf[0] as i32, buf[1] as i32, buf[2] as i32, buf[3] as i32);
     Ok(b1 + (b2 << 8) + (b3 << 16) + (b4 << 24))
 }
 
 fn read_string(f: &mut File) -> io::Result<String> {
-    let len = try!(read_int(f));
+    let len = read_int(f)?;
     let mut buf = vec![0u8; len as usize];
-    let _ = try!(f.read(buf.as_mut_slice()));
+    f.read(buf.as_mut_slice())?;
     String::from_utf8(buf).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid data"))
 }
 
 fn read_strings(f: &mut File, n: i32) -> io::Result<Vec<String>> {
     let mut strings = Vec::with_capacity(n as usize);
     for _ in 0..n {
-        strings.push(try!(read_string(f)));
+        strings.push(read_string(f)?);
     }
 
     Ok(strings)
@@ -528,7 +528,7 @@ fn read_strings(f: &mut File, n: i32) -> io::Result<Vec<String>> {
 fn read_exps(f: &mut File, n: i32) -> io::Result<Vec<Exp>> {
     let mut exps = Vec::with_capacity(n as usize);
     for _ in 0..n {
-        exps.push(try!(Exp::read(f)));
+        exps.push(Exp::read(f)?);
     }
 
     Ok(exps)
@@ -537,7 +537,7 @@ fn read_exps(f: &mut File, n: i32) -> io::Result<Vec<Exp>> {
 fn read_slots(f: &mut File, n: i32) -> io::Result<Vec<SlotStmt>> {
     let mut slots = Vec::with_capacity(n as usize);
     for _ in 0..n {
-        slots.push(try!(SlotStmt::read(f)));
+        slots.push(SlotStmt::read(f)?);
     }
 
     Ok(slots)

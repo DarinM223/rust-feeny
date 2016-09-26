@@ -10,11 +10,11 @@ use std::rc::Rc;
 
 /// Interprets the bytecode structure
 pub fn interpret_bc(program: Program) -> io::Result<()> {
-    let mut vm = try!(VM::new(&program));
+    let mut vm = VM::new(&program)?;
 
     while vm.pc < vm.code.len() as i32 {
         let pc = vm.pc as usize;
-        match try!(vm.eval(pc, &program)) {
+        match vm.eval(pc, &program)? {
             EvalResult::Continue => vm.pc += 1,
             EvalResult::Return => break,
         }
