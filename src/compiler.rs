@@ -73,7 +73,8 @@ impl Exp {
                 for exp in &printf.exps {
                     exp.compile(env, program, method_idx, name_cache)?;
                 }
-                program.add_instruction(method_idx, Inst::Printf(format_id as i16, printf.nexps as u8))?;
+                program.add_instruction(method_idx,
+                                     Inst::Printf(format_id as i16, printf.nexps as u8))?;
             }
             Exp::Array(ref arr) => {
                 debug!("Array: init: {:?} length: {:?}", arr.init, arr.length);

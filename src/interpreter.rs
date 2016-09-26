@@ -25,11 +25,7 @@ impl Exp {
                 for ch in printf.format.chars() {
                     if ch == '~' {
                         let res = printf.exps[counter].eval(genv, env)?;
-                        if let Obj::Int(obj) = res {
-                            print!("{}", obj.value);
-                        } else {
-                            return Err(Error::new(InvalidInput, "Can only print Ints"));
-                        }
+                        print!("{}", res.int()?.value);
                         counter += 1;
                     } else {
                         print!("{}", ch);
@@ -43,7 +39,8 @@ impl Exp {
                 Ok(Obj::Array(Rc::new(RefCell::new(ArrayObj::new(length, init)))))
             }
             Exp::Object(ref obj) => {
-                let mut env_obj = Obj::Env(Rc::new(RefCell::new(make_env_obj(Some(obj.parent.eval(genv, env)?)))));
+                let mut env_obj = Obj::Env(Rc::new(RefCell::new(make_env_obj(Some(obj.parent
+                    .eval(genv, env)?)))));
                 for slot in &obj.slots {
                     slot.exec(genv, env, &mut env_obj);
                 }
@@ -51,27 +48,15 @@ impl Exp {
             }
             Exp::Slot(ref slot) => {
                 debug!("Getting slot: {}", &slot.name[..]);
-                let obj = slot.exp.eval(genv, env)?;
-                if let Obj::Env(env_obj) = obj {
-                    let entry = env_obj.borrow().get(&slot.name[..]);
-                    if let Some(Entry::Var(obj)) = entry {
-                        Ok(obj)
-                    } else {
-                        Err(Error::new(InvalidData, "The object should contain a Var"))
-                    }
-                } else {
-                    Err(Error::new(InvalidData, "Object has to be an environment type"))
-                }
+                let env_obj = slot.exp.eval(genv, env)?.env()?;
+                let var_slot = env_obj.borrow().get_result(&slot.name[..])?.var();
+                var_slot
             }
             Exp::SetSlot(ref setslot) => {
                 debug!("Setting slot: {}", &setslot.name[..]);
-                let obj = setslot.exp.eval(genv, env)?;
+                let env_obj = setslot.exp.eval(genv, env)?.env()?;
                 let value = setslot.value.eval(genv, env)?;
-                if let Obj::Env(env_obj) = obj {
-                    env_obj.borrow_mut().add(&setslot.name[..], Entry::Var(value));
-                } else {
-                    return Err(Error::new(InvalidData, "Object has to be an environment object"));
-                }
+                env_obj.borrow_mut().add(&setslot.name[..], Entry::Var(value));
 
                 Ok(Obj::Null)
             }
@@ -115,37 +100,25 @@ impl Exp {
                         }
                     }
                     Obj::Env(ref mut ent) => {
-                        let entry: Option<Entry>;
-                        {
-                            entry = ent.borrow().get(&cs.name[..]).clone();
+                        let (fun, args) = ent.borrow().get_result(&cs.name[..])?.clone().func()?;
+                        if cs.nargs as usize != args.len() {
+                            return Err(Error::new(InvalidInput, "Args number doesn't match"));
                         }
 
-                        if let Some(Entry::Func(fun, args)) = entry {
-                            if cs.nargs as usize != args.len() {
-                                return Err(Error::new(InvalidInput, "Args number doesn't match"));
-                            }
-
-                            let mut new_env = EnvObj::new(None);
-                            for (i, arg) in cs.args.iter().enumerate() {
-                                new_env.add(&args[i][..], Entry::Var(arg.eval(genv, env)?));
-                            }
-                            new_env.add("this", Entry::Var(Obj::Env(ent.clone())));
-
-                            fun.eval(genv, &mut Obj::Env(Rc::new(RefCell::new(new_env))))
-                        } else {
-                            Err(Error::new(InvalidInput, "Function is not found"))
+                        let mut new_env = EnvObj::new(None);
+                        for (i, arg) in cs.args.iter().enumerate() {
+                            new_env.add(&args[i][..], Entry::Var(arg.eval(genv, env)?));
                         }
+                        new_env.add("this", Entry::Var(Obj::Env(ent.clone())));
+
+                        fun.eval(genv, &mut Obj::Env(Rc::new(RefCell::new(new_env))))
                     }
                     _ => unreachable!(),
                 }
             }
             Exp::Call(ref call) => {
                 debug!("Calling function: {}", &call.name[..]);
-                let (fun, args) = match genv.get(&call.name[..]) {
-                    Some(Entry::Func(ref fun, ref args)) => (fun.clone(), args.clone()),
-                    _ => return Err(Error::new(InvalidInput, "Function not found")),
-                };
-
+                let (fun, args) = genv.get_result(&call.name[..])?.clone().func()?;
                 if call.nargs as usize != args.len() {
                     return Err(Error::new(InvalidData, "Args number does not match"));
                 }
@@ -159,14 +132,8 @@ impl Exp {
             }
             Exp::Set(ref set) => {
                 let res = set.exp.eval(genv, env)?;
-                let ent = get_entry(&set.name[..], genv, env);
-
-                match ent {
-                    Entry::Var(_) => {
-                        let _ = set_entry(&set.name, &Entry::Var(res), genv, env);
-                    }
-                    Entry::Func(_, _) => return Err(Error::new(InvalidData, "Setting func")),
-                };
+                get_entry(&set.name[..], genv, env).var()?;
+                set_entry(&set.name, &Entry::Var(res), genv, env);
                 Ok(Obj::Null)
             }
             Exp::If(ref iexp) => {
@@ -182,14 +149,7 @@ impl Exp {
                 }
                 Ok(Obj::Null)
             }
-            Exp::Ref(ref name) => {
-                let ent = get_entry(name, genv, env);
-
-                match ent {
-                    Entry::Var(ref obj) => Ok(obj.clone()),
-                    Entry::Func(_, _) => Err(Error::new(InvalidInput, "ref to function")),
-                }
-            }
+            Exp::Ref(ref name) => Ok(get_entry(name, genv, env).var()?.clone()),
         }
     }
 }
@@ -198,25 +158,18 @@ impl SlotStmt {
     /// Execute a slot statement given a local and global environment and
     /// the object that contains the slot
     pub fn exec(&self, genv: &mut EnvObj<Entry>, env: &mut Obj, obj: &mut Obj) -> io::Result<()> {
-        use std::io::Error;
-        use std::io::ErrorKind::*;
-
-        if let Obj::Env(ref mut env_obj) = *obj {
-            match *self {
-                SlotStmt::Var(ref var) => {
-                    let var_exp = var.exp.eval(genv, env)?;
-                    env_obj.borrow_mut().add(&var.name[..], Entry::Var(var_exp));
-                }
-                SlotStmt::Method(ref met) => {
-                    env_obj.borrow_mut().add(&met.name[..],
-                                             Entry::Func(met.body.clone(), met.args.clone()));
-                }
+        let env_obj = obj.env_mut()?;
+        match *self {
+            SlotStmt::Var(ref var) => {
+                let var_exp = var.exp.eval(genv, env)?;
+                env_obj.borrow_mut().add(&var.name[..], Entry::Var(var_exp));
             }
-
-            Ok(())
-        } else {
-            Err(Error::new(InvalidData, "Expected object to be an environment object"))
+            SlotStmt::Method(ref met) => {
+                env_obj.borrow_mut().add(&met.name[..],
+                                         Entry::Func(met.body.clone(), met.args.clone()));
+            }
         }
+        Ok(())
     }
 }
 
@@ -273,9 +226,73 @@ impl Obj {
 
     /// Creates an Integer object if true, otherwise creates a Null object
     pub fn from_bool(b: bool) -> Obj {
+        use std::io::Error;
+        use std::io::ErrorKind::*;
         match b {
             true => Obj::Int(IntObj { value: 0 }),
             false => Obj::Null,
+        }
+    }
+
+    /// Returns a Result<> containing nothing if object is null, or an error
+    /// if the object is not a null object
+    #[inline]
+    pub fn null(self) -> io::Result<()> {
+        use std::io::Error;
+        use std::io::ErrorKind::*;
+        match self {
+            Obj::Null => Ok(()),
+            _ => Err(Error::new(InvalidData, "The object should contain a null value")),
+        }
+    }
+
+    /// Returns the unwrapped integer object as a Result<>
+    #[inline]
+    pub fn int(self) -> io::Result<IntObj> {
+        use std::io::Error;
+        use std::io::ErrorKind::*;
+        match self {
+            Obj::Int(obj) => Ok(obj),
+            _ => Err(Error::new(InvalidData, "The object should contain an integer")),
+        }
+    }
+
+    /// Returns the unwrapped array object as a Result<>
+    #[inline]
+    pub fn array(self) -> io::Result<Rc<RefCell<ArrayObj>>> {
+        use std::io::Error;
+        use std::io::ErrorKind::*;
+        match self {
+            Obj::Array(arr) => Ok(arr),
+            _ => Err(Error::new(InvalidData, "The object should contain an array")),
+        }
+    }
+
+    /// Returns the unwrapped environment object as a Result<>
+    #[inline]
+    pub fn env(self) -> io::Result<EnvObjRef<Entry>> {
+        use std::io::Error;
+        use std::io::ErrorKind::*;
+        match self {
+            Obj::Env(e) => Ok(e),
+            _ => {
+                Err(Error::new(InvalidData,
+                               "The object should contain an environment object"))
+            }
+        }
+    }
+
+    /// Returns a mutable reference to the unwrapped environment object as a Result<>
+    #[inline]
+    pub fn env_mut<'a>(&'a mut self) -> io::Result<&'a mut EnvObjRef<Entry>> {
+        use std::io::Error;
+        use std::io::ErrorKind::*;
+        match *self {
+            Obj::Env(ref mut e) => Ok(e),
+            _ => {
+                Err(Error::new(InvalidData,
+                               "The object should contain an environment object"))
+            }
         }
     }
 }
@@ -383,6 +400,30 @@ pub enum Entry {
     Func(ScopeStmt, Vec<String>),
 }
 
+impl Entry {
+    /// Returns the unwrapped variable entry as a Result<>
+    #[inline]
+    pub fn var(self) -> io::Result<Obj> {
+        use std::io::Error;
+        use std::io::ErrorKind::*;
+        match self {
+            Entry::Var(obj) => Ok(obj),
+            _ => Err(Error::new(InvalidData, "The entry should be a variable entry")),
+        }
+    }
+
+    /// Returns the unwrapped method entry as a Result<>
+    #[inline]
+    pub fn func(self) -> io::Result<(ScopeStmt, Vec<String>)> {
+        use std::io::Error;
+        use std::io::ErrorKind::*;
+        match self {
+            Entry::Func(stmt, strs) => Ok((stmt, strs)),
+            _ => Err(Error::new(InvalidData, "The entry should be a method entry")),
+        }
+    }
+}
+
 /// A generic environment object implementation that allows
 /// for prototypical inheritance (like Javascript)
 #[derive(Clone, Debug, PartialEq)]
@@ -428,6 +469,18 @@ impl<T: Clone + PartialEq> EnvObj<T> {
         }
 
         None
+    }
+
+    /// Same as get() but returns a Result<> instead of an Option<>
+    #[inline]
+    pub fn get_result(&self, name: &str) -> io::Result<T> {
+        match self.get(name) {
+            Some(item) => Ok(item),
+            None => {
+                Err(io::Error::new(io::ErrorKind::NotFound,
+                                   format!("Cannot find item in object with name: {}", name)))
+            }
+        }
     }
 
     /// Attempts to traverse up the parents looking for
