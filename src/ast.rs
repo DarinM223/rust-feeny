@@ -2,10 +2,35 @@ use std::fs::File;
 use std::io;
 use std::io::prelude::Read;
 use std::mem::transmute;
+use std::result;
+use std::string::FromUtf8Error;
+
+#[derive(Debug)]
+pub enum AstError {
+    IoError(io::Error),
+    Utf8Error(FromUtf8Error),
+    InvalidExpressionType,
+    InvalidSlotType,
+    InvalidScopeType,
+}
+
+impl From<io::Error> for AstError {
+    fn from(err: io::Error) -> AstError {
+        AstError::IoError(err)
+    }
+}
+
+impl From<FromUtf8Error> for AstError {
+    fn from(err: FromUtf8Error) -> AstError {
+        AstError::Utf8Error(err)
+    }
+}
+
+pub type Result<T> = result::Result<T, AstError>;
 
 /// Reads a path to an AST file, parses the file contents into
 /// the AST, and returns the root ScopeStmt
-pub fn read_ast(path: String) -> io::Result<ScopeStmt> {
+pub fn read_ast(path: String) -> Result<ScopeStmt> {
     let mut file = File::open(path)?;
     ScopeStmt::read(&mut file)
 }
@@ -111,7 +136,7 @@ impl Exp {
     }
 
     /// Reads an expression from a file
-    pub fn read(f: &mut File) -> io::Result<Exp> {
+    pub fn read(f: &mut File) -> Result<Exp> {
         let tag = read_int(f)?;
         match AstTag::from_i32(tag) {
             AstTag::IntExp => Ok(Exp::Int(read_int(f)?)),
@@ -221,7 +246,7 @@ impl Exp {
                 })))
             }
             AstTag::RefExp => Ok(Exp::Ref(read_string(f)?)),
-            _ => Err(io::Error::new(io::ErrorKind::NotFound, "Invalid expression type")),
+            _ => Err(AstError::InvalidExpressionType),
         }
     }
 }
@@ -257,7 +282,7 @@ impl SlotStmt {
     }
 
     /// Reads a slot statement from a file
-    pub fn read(f: &mut File) -> io::Result<SlotStmt> {
+    pub fn read(f: &mut File) -> Result<SlotStmt> {
         let tag = read_int(f)?;
 
         match AstTag::from_i32(tag) {
@@ -283,7 +308,7 @@ impl SlotStmt {
                     body: body,
                 }))
             }
-            _ => Err(io::Error::new(io::ErrorKind::NotFound, "Invalid slot type")),
+            _ => Err(AstError::InvalidSlotType),
         }
     }
 }
@@ -327,7 +352,7 @@ impl ScopeStmt {
     }
 
     /// Reads a scope statement from a file
-    pub fn read(f: &mut File) -> io::Result<ScopeStmt> {
+    pub fn read(f: &mut File) -> Result<ScopeStmt> {
         let tag = read_int(f)?;
 
         match AstTag::from_i32(tag) {
@@ -360,7 +385,7 @@ impl ScopeStmt {
                 Ok(ScopeStmt::Seq(Box::new(ScopeSeq { a: a, b: b })))
             }
             AstTag::ExpStmt => Ok(ScopeStmt::Exp(Exp::read(f)?)),
-            _ => Err(io::Error::new(io::ErrorKind::NotFound, "Invalid scope type")),
+            _ => Err(AstError::InvalidScopeType),
         }
     }
 }
@@ -502,21 +527,22 @@ impl AstTag {
     }
 }
 
-fn read_int(f: &mut File) -> io::Result<i32> {
+fn read_int(f: &mut File) -> Result<i32> {
     let mut buf = [0; 4];
     f.read(&mut buf)?;
     let (b1, b2, b3, b4) = (buf[0] as i32, buf[1] as i32, buf[2] as i32, buf[3] as i32);
     Ok(b1 + (b2 << 8) + (b3 << 16) + (b4 << 24))
 }
 
-fn read_string(f: &mut File) -> io::Result<String> {
+fn read_string(f: &mut File) -> Result<String> {
     let len = read_int(f)?;
     let mut buf = vec![0u8; len as usize];
     f.read(buf.as_mut_slice())?;
-    String::from_utf8(buf).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid data"))
+
+    Ok(String::from_utf8(buf)?)
 }
 
-fn read_strings(f: &mut File, n: i32) -> io::Result<Vec<String>> {
+fn read_strings(f: &mut File, n: i32) -> Result<Vec<String>> {
     let mut strings = Vec::with_capacity(n as usize);
     for _ in 0..n {
         strings.push(read_string(f)?);
@@ -525,7 +551,7 @@ fn read_strings(f: &mut File, n: i32) -> io::Result<Vec<String>> {
     Ok(strings)
 }
 
-fn read_exps(f: &mut File, n: i32) -> io::Result<Vec<Exp>> {
+fn read_exps(f: &mut File, n: i32) -> Result<Vec<Exp>> {
     let mut exps = Vec::with_capacity(n as usize);
     for _ in 0..n {
         exps.push(Exp::read(f)?);
@@ -534,7 +560,7 @@ fn read_exps(f: &mut File, n: i32) -> io::Result<Vec<Exp>> {
     Ok(exps)
 }
 
-fn read_slots(f: &mut File, n: i32) -> io::Result<Vec<SlotStmt>> {
+fn read_slots(f: &mut File, n: i32) -> Result<Vec<SlotStmt>> {
     let mut slots = Vec::with_capacity(n as usize);
     for _ in 0..n {
         slots.push(SlotStmt::read(f)?);

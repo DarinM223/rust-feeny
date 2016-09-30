@@ -2,10 +2,32 @@ use std::fs::File;
 use std::io;
 use std::io::prelude::Read;
 use std::mem::transmute;
+use std::result;
+use std::string::FromUtf8Error;
+
+#[derive(Debug)]
+pub enum BytecodeError {
+    IoError(io::Error),
+    Utf8Error(FromUtf8Error),
+}
+
+impl From<io::Error> for BytecodeError {
+    fn from(err: io::Error) -> BytecodeError {
+        BytecodeError::IoError(err)
+    }
+}
+
+impl From<FromUtf8Error> for BytecodeError {
+    fn from(err: FromUtf8Error) -> BytecodeError {
+        BytecodeError::Utf8Error(err)
+    }
+}
+
+pub type Result<T> = result::Result<T, BytecodeError>;
 
 /// Reads a path to an bytecode file, parses the file contents into
 /// the bytecode structure, and returns the program
-pub fn load_bytecode(path: &str) -> io::Result<Program> {
+pub fn load_bytecode(path: &str) -> Result<Program> {
     let mut file = File::open(path)?;
     Program::read(&mut file)
 }
@@ -23,7 +45,7 @@ pub enum Value {
 
 impl Value {
     /// Reads a value from a file
-    pub fn read(f: &mut File) -> io::Result<Value> {
+    pub fn read(f: &mut File) -> Result<Value> {
         let tag = read_byte(f)?;
         Ok(match ValTag::from_u8(tag) {
             ValTag::Int => Value::Int(read_int(f)?),
@@ -105,7 +127,7 @@ pub enum Inst {
 
 impl Inst {
     /// Reads an instruction from a file
-    pub fn read(f: &mut File) -> io::Result<Inst> {
+    pub fn read(f: &mut File) -> Result<Inst> {
         let op = read_byte(f)?;
         Ok(match OpCode::from_u8(op) {
             OpCode::Label => Inst::Label(read_short(f)?),
@@ -163,7 +185,7 @@ pub struct Program {
 
 impl Program {
     /// Reads a program from a file
-    pub fn read(f: &mut File) -> io::Result<Program> {
+    pub fn read(f: &mut File) -> Result<Program> {
         Ok(Program {
             values: read_values(f)?,
             slots: read_slots(f)?,
@@ -251,18 +273,18 @@ impl OpCode {
     }
 }
 
-fn read_byte(f: &mut File) -> io::Result<u8> {
-    f.bytes().next().unwrap()
+fn read_byte(f: &mut File) -> Result<u8> {
+    Ok(f.bytes().next().unwrap()?)
 }
 
-fn read_short(f: &mut File) -> io::Result<i16> {
+fn read_short(f: &mut File) -> Result<i16> {
     let b1 = read_byte(f)? as i16;
     let b2 = read_byte(f)? as i16;
 
     Ok(b1 + (b2 << 8))
 }
 
-fn read_int(f: &mut File) -> io::Result<i32> {
+fn read_int(f: &mut File) -> Result<i32> {
     let b1 = read_byte(f)? as i32;
     let b2 = read_byte(f)? as i32;
     let b3 = read_byte(f)? as i32;
@@ -271,20 +293,17 @@ fn read_int(f: &mut File) -> io::Result<i32> {
     Ok(b1 + (b2 << 8) + (b3 << 16) + (b4 << 24))
 }
 
-fn read_string(f: &mut File) -> io::Result<String> {
+fn read_string(f: &mut File) -> Result<String> {
     let len = read_int(f)?;
     let mut buf = Vec::with_capacity(len as usize);
     for _ in 0..len {
         buf.push(read_byte(f)?);
     }
 
-    String::from_utf8(buf).map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidInput,
-                       "Error converting utf8 to string")
-    })
+    Ok(String::from_utf8(buf)?)
 }
 
-fn read_code(f: &mut File) -> io::Result<Vec<Inst>> {
+fn read_code(f: &mut File) -> Result<Vec<Inst>> {
     let n = read_int(f)?;
     let mut vec = Vec::with_capacity(n as usize);
     for _ in 0..n {
@@ -293,7 +312,7 @@ fn read_code(f: &mut File) -> io::Result<Vec<Inst>> {
     Ok(vec)
 }
 
-fn read_slots(f: &mut File) -> io::Result<Vec<i16>> {
+fn read_slots(f: &mut File) -> Result<Vec<i16>> {
     let n = read_short(f)?;
     let mut vec = Vec::with_capacity(n as usize);
     for _ in 0..n {
@@ -302,7 +321,7 @@ fn read_slots(f: &mut File) -> io::Result<Vec<i16>> {
     Ok(vec)
 }
 
-fn read_values(f: &mut File) -> io::Result<Vec<Value>> {
+fn read_values(f: &mut File) -> Result<Vec<Value>> {
     let n = read_short(f)?;
     let mut vec = Vec::with_capacity(n as usize);
     for _ in 0..n {
