@@ -236,21 +236,20 @@ impl ScopeStmt {
       ScopeStmt::Var(ref var) => {
         debug!("Var: name: {:?} exp: {:?}", var.name, var.exp);
         if *env != None {
-          match *env {
-            Some(ref mut env) if env.len() > 1 => {
-              let id = *(env.values().max().unwrap()) + 1;
-              env.insert(var.name.clone(), id);
-            }
-            _ => {}
-          }
+          let id = if let Some(ref mut env) = *env {
+            let id = env.values().max().unwrap_or(&-1) + 1;
+            env.insert(var.name.clone(), id);
+            id
+          } else {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid environment"));
+          };
+
           let mid = method_idx;
           if let Some(&mut Value::Method(ref mut met)) = program.values.get_mut(mid) {
             met.nlocals += 1;
           }
           var.exp.compile(env, program, method_idx, name_cache)?;
-
-          let name_id = program.get_str_id(&var.name[..], name_cache) as i16;
-          program.add_instruction(method_idx, Inst::SetLocal(name_id))?;
+          program.add_instruction(method_idx, Inst::SetLocal(id as i16))?;
         } else {
           let name_id = program.get_str_id(&var.name[..], name_cache);
           let slot_id = program.add_value(Value::Slot(name_id as i16));
