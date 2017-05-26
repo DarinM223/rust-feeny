@@ -1,5 +1,3 @@
-#![feature(question_mark)]
-
 #[macro_use]
 extern crate log;
 extern crate env_logger;
@@ -59,6 +57,9 @@ fn main() {
                         panic!(err);
                     }
                 };
+                program.print();
+
+                println!("");
 
                 match vm::interpret_bc(program) {
                     Ok(_) => println!("Program completed!"),

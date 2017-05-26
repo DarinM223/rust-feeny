@@ -12,10 +12,18 @@ pub fn compile(stmt: &ScopeStmt) -> io::Result<Program> {
         null_idx: 0,
         label_count: 0,
     };
-    let entry = program.entry as usize;
+    let mut name_cache = HashMap::new();
+    let entry_str = program.get_str_id("__ENTRY__", &mut name_cache) as i16;
+    program.entry = program.add_value(Value::Method(MethodValue {
+                                                        name: entry_str,
+                                                        nargs: 0,
+                                                        nlocals: 0,
+                                                        code: Vec::new(),
+                                                    })) as i16;
     program.null_idx = program.add_value(Value::Null) as i16;
 
-    stmt.compile(&mut None, &mut program, entry, &mut HashMap::new())?;
+    let entry = program.entry as usize;
+    stmt.compile(&mut None, &mut program, entry, &mut name_cache)?;
     Ok(program)
 }
 
@@ -73,41 +81,53 @@ impl Exp {
                 for exp in &printf.exps {
                     exp.compile(env, program, method_idx, name_cache)?;
                 }
-                program.add_instruction(method_idx,
+                program
+                    .add_instruction(method_idx,
                                      Inst::Printf(format_id as i16, printf.nexps as u8))?;
             }
             Exp::Array(ref arr) => {
                 debug!("Array: init: {:?} length: {:?}", arr.init, arr.length);
-                arr.length.compile(env, program, method_idx, name_cache)?;
+                arr.length
+                    .compile(env, program, method_idx, name_cache)?;
                 arr.init.compile(env, program, method_idx, name_cache)?;
                 program.add_instruction(method_idx, Inst::Array)?;
             }
             Exp::Object(ref obj) => {
                 debug!("Object: parent: {:?} nslots: {}", obj.parent, obj.nslots);
-                obj.parent.compile(env, program, method_idx, name_cache)?;
+                obj.parent
+                    .compile(env, program, method_idx, name_cache)?;
                 let mut class_val = ClassValue { slots: vec![] };
                 for slot in &obj.slots {
-                    class_val.slots.push(slot.compile(env, program, method_idx, name_cache)?);
+                    class_val
+                        .slots
+                        .push(slot.compile(env, program, method_idx, name_cache)?);
                 }
 
                 let class_id = program.add_value(Value::Class(class_val));
-                program.add_instruction(method_idx, Inst::Object(class_id as i16))?;
+                program
+                    .add_instruction(method_idx, Inst::Object(class_id as i16))?;
             }
             Exp::Slot(ref slot) => {
                 debug!("Slot: name: {} exp: {:?}", slot.name, slot.exp);
                 slot.exp.compile(env, program, method_idx, name_cache)?;
                 let str_id = program.get_str_id(&slot.name[..], name_cache) as i16;
-                program.add_instruction(method_idx, Inst::GetSlot(str_id))?;
+                program
+                    .add_instruction(method_idx, Inst::GetSlot(str_id))?;
             }
             Exp::SetSlot(ref setslot) => {
                 debug!("Setting slot: name: {} exp: {:?} value: {:?}",
                        setslot.name,
                        setslot.exp,
                        setslot.value);
-                setslot.exp.compile(env, program, method_idx, name_cache)?;
-                setslot.value.compile(env, program, method_idx, name_cache)?;
+                setslot
+                    .exp
+                    .compile(env, program, method_idx, name_cache)?;
+                setslot
+                    .value
+                    .compile(env, program, method_idx, name_cache)?;
                 let str_id = program.get_str_id(&setslot.name[..], name_cache) as i16;
-                program.add_instruction(method_idx, Inst::SetSlot(str_id))?;
+                program
+                    .add_instruction(method_idx, Inst::SetSlot(str_id))?;
                 program.add_instruction(method_idx, Inst::Drop)?;
             }
             Exp::CallSlot(ref callslot) => {
@@ -115,14 +135,17 @@ impl Exp {
                        callslot.name,
                        callslot.exp,
                        callslot.args);
-                callslot.exp.compile(env, program, method_idx, name_cache)?;
+                callslot
+                    .exp
+                    .compile(env, program, method_idx, name_cache)?;
                 for arg in &callslot.args {
                     arg.compile(env, program, method_idx, name_cache)?;
                 }
 
                 let str_id = program.get_str_id(&callslot.name[..], name_cache);
                 let nargs = callslot.nargs as u8 + 1;
-                program.add_instruction(method_idx, Inst::CallSlot(str_id as i16, nargs))?;
+                program
+                    .add_instruction(method_idx, Inst::CallSlot(str_id as i16, nargs))?;
             }
             Exp::Call(ref call) => {
                 debug!("Calling: name: {} args: {:?}", call.name, call.args);
@@ -130,7 +153,8 @@ impl Exp {
                     arg.compile(env, program, method_idx, name_cache)?;
                 }
                 let str_id = program.get_str_id(&call.name[..], name_cache) as i16;
-                program.add_instruction(method_idx, Inst::Call(str_id, call.nargs as u8))?;
+                program
+                    .add_instruction(method_idx, Inst::Call(str_id, call.nargs as u8))?;
             }
             Exp::Set(ref set) => {
                 debug!("Setting: name: {} exp: {:?}", set.name, set.exp);
@@ -156,21 +180,31 @@ impl Exp {
                 program.label_count += 2;
 
                 // Compile predicate
-                if_exp.pred.compile(env, program, method_idx, name_cache)?;
+                if_exp
+                    .pred
+                    .compile(env, program, method_idx, name_cache)?;
 
                 // If predicate is true go to on_true:
-                program.add_instruction(method_idx, Inst::Branch(on_true as i16))?;
+                program
+                    .add_instruction(method_idx, Inst::Branch(on_true as i16))?;
 
                 // Otherwise run instructions in else block then jump to on_false:
-                if_exp.alt.compile(env, program, method_idx, name_cache)?;
-                program.add_instruction(method_idx, Inst::Goto(on_false as i16))?;
+                if_exp
+                    .alt
+                    .compile(env, program, method_idx, name_cache)?;
+                program
+                    .add_instruction(method_idx, Inst::Goto(on_false as i16))?;
 
                 // on_true: Run instructions in if block
-                program.add_instruction(method_idx, Inst::Label(on_true as i16))?;
-                if_exp.conseq.compile(env, program, method_idx, name_cache)?;
+                program
+                    .add_instruction(method_idx, Inst::Label(on_true as i16))?;
+                if_exp
+                    .conseq
+                    .compile(env, program, method_idx, name_cache)?;
 
                 // on_false:
-                program.add_instruction(method_idx, Inst::Label(on_false as i16))?;
+                program
+                    .add_instruction(method_idx, Inst::Label(on_false as i16))?;
             }
             Exp::While(ref while_exp) => {
                 debug!("While: predicate: {:?} body: {:?}",
@@ -187,24 +221,34 @@ impl Exp {
                 program.label_count += 3;
 
                 // start:
-                program.add_instruction(method_idx, Inst::Label(start as i16))?;
+                program
+                    .add_instruction(method_idx, Inst::Label(start as i16))?;
 
                 // Compile predicate
-                while_exp.pred.compile(env, program, method_idx, name_cache)?;
+                while_exp
+                    .pred
+                    .compile(env, program, method_idx, name_cache)?;
 
                 // If predicate is true go to body:
-                program.add_instruction(method_idx, Inst::Branch(body as i16))?;
+                program
+                    .add_instruction(method_idx, Inst::Branch(body as i16))?;
 
                 // Otherwise go to end:
-                program.add_instruction(method_idx, Inst::Goto(end as i16))?;
+                program
+                    .add_instruction(method_idx, Inst::Goto(end as i16))?;
 
                 // body: evaluate instructions in body then loop to start:
-                program.add_instruction(method_idx, Inst::Label(body as i16))?;
-                while_exp.body.compile(env, program, method_idx, name_cache)?;
-                program.add_instruction(method_idx, Inst::Goto(start as i16))?;
+                program
+                    .add_instruction(method_idx, Inst::Label(body as i16))?;
+                while_exp
+                    .body
+                    .compile(env, program, method_idx, name_cache)?;
+                program
+                    .add_instruction(method_idx, Inst::Goto(start as i16))?;
 
                 // end:
-                program.add_instruction(method_idx, Inst::Label(end as i16))?;
+                program
+                    .add_instruction(method_idx, Inst::Label(end as i16))?;
             }
             Exp::Ref(ref refname) => {
                 debug!("Ref: {:?}", refname);
@@ -245,13 +289,15 @@ impl ScopeStmt {
                     var.exp.compile(env, program, method_idx, name_cache)?;
 
                     let name_id = program.get_str_id(&var.name[..], name_cache) as i16;
-                    program.add_instruction(method_idx, Inst::SetLocal(name_id))?;
+                    program
+                        .add_instruction(method_idx, Inst::SetLocal(name_id))?;
                 } else {
                     let name_id = program.get_str_id(&var.name[..], name_cache);
                     let slot_id = program.add_value(Value::Slot(name_id as i16));
                     program.slots.push(slot_id as i16);
                     var.exp.compile(env, program, method_idx, name_cache)?;
-                    program.add_instruction(method_idx, Inst::SetGlobal(name_id as i16))?;
+                    program
+                        .add_instruction(method_idx, Inst::SetGlobal(name_id as i16))?;
                 }
 
                 program.add_instruction(method_idx, Inst::Drop)?;
@@ -263,16 +309,17 @@ impl ScopeStmt {
                        fun.body);
                 let name_id = program.get_str_id(&fun.name[..], name_cache) as i16;
                 let new_method_id = program.add_value(Value::Method(MethodValue {
-                    code: Vec::new(),
-                    name: name_id,
-                    nargs: fun.nargs as u8,
-                    nlocals: 0,
-                }));
+                                                                        code: Vec::new(),
+                                                                        name: name_id,
+                                                                        nargs: fun.nargs as u8,
+                                                                        nlocals: 0,
+                                                                    }));
                 let mut new_env = HashMap::new();
                 for (i, arg) in fun.args.iter().enumerate() {
                     new_env.insert(arg.clone(), i as i32);
                 }
-                fun.body.compile(&mut Some(new_env), program, new_method_id, name_cache)?;
+                fun.body
+                    .compile(&mut Some(new_env), program, new_method_id, name_cache)?;
                 program.slots.push(new_method_id as i16);
                 program.add_instruction(new_method_id, Inst::Return)?;
             }
@@ -312,11 +359,11 @@ impl SlotStmt {
                        met.body);
                 let name = program.get_str_id(&met.name[..], name_cache) as i16;
                 let new_method_id = program.add_value(Value::Method(MethodValue {
-                    code: Vec::new(),
-                    name: name,
-                    nargs: met.nargs as u8,
-                    nlocals: 0,
-                }));
+                                                                        code: Vec::new(),
+                                                                        name: name,
+                                                                        nargs: met.nargs as u8,
+                                                                        nlocals: 0,
+                                                                    }));
 
                 let mut new_env = HashMap::new();
                 new_env.insert("this".to_owned(), 0);
@@ -324,7 +371,8 @@ impl SlotStmt {
                     new_env.insert(arg.clone(), (i + 1) as i32);
                 }
 
-                met.body.compile(&mut Some(new_env), program, new_method_id, name_cache)?;
+                met.body
+                    .compile(&mut Some(new_env), program, new_method_id, name_cache)?;
                 program.add_instruction(new_method_id, Inst::Return)?;
                 Ok(new_method_id as i16)
             }
