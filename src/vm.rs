@@ -89,6 +89,91 @@ impl Frame {
   }
 }
 
+pub enum HeapObj {
+  Int(i64),
+  Null(i64),
+  Array(i64, Vec<i64>),
+  Object(i64, Vec<i64>),
+}
+
+pub const FRAMES_SIZE: usize = 10000;
+
+pub struct Frames {
+  frames: [i64; FRAMES_SIZE],
+  curr_frame: usize,
+  curr_size: usize,
+}
+
+impl Frames {
+  pub fn new() -> Frames {
+    Frames {
+      frames: [0; FRAMES_SIZE],
+      curr_frame: 0,
+      curr_size: 0,
+    }
+  }
+
+  /// Pushes a new stack frame.
+  pub fn push(&mut self, parent_frame: i64, return_addr: i64, slots: Vec<i64>) {
+    self.frames[self.curr_size] = parent_frame;
+    self.frames[self.curr_size + 1] = return_addr;
+    for i in 0..slots.len() {
+      self.frames[self.curr_size + 2 + i] = slots[i];
+    }
+    self.curr_frame = self.curr_size as usize;
+    self.curr_size += 2 + slots.len();
+  }
+
+  /// Pops a frame from the stack.
+  pub fn pop(&mut self) {
+    let parent_frame = self.frames[self.curr_frame];
+    // Null out all of the values in the current frame.
+    for i in self.curr_frame..FRAMES_SIZE {
+      self.frames[i] = 0;
+    }
+
+    self.curr_frame = parent_frame as usize;
+  }
+
+  /// Gets the index of the current frame.
+  pub fn curr_frame(&self) -> usize {
+    self.curr_frame
+  }
+}
+
+#[test]
+fn test_frames_push_pop() {
+  let mut frames = Frames::new();
+  let frame1_slots = vec![1, 2, 3, 4, 5, 6, 7, 8];
+  let frame2_slots = vec![9, 10, 11, 12, 13, 14];
+  frames.push(-1, 24, frame1_slots.clone());
+
+  let curr_frame = frames.curr_frame() as i64;
+  frames.push(curr_frame, 60, frame2_slots.clone());
+
+  assert_eq!(frames.frames[0], -1);
+  assert_eq!(frames.frames[1], 24);
+  for i in 2..10 {
+    assert_eq!(frames.frames[i], frame1_slots[i - 2]);
+  }
+
+  assert_eq!(frames.curr_frame(), 10);
+  assert_eq!(frames.frames[10], 0);
+  assert_eq!(frames.frames[11], 60);
+  for i in 12..18 {
+    assert_eq!(frames.frames[i], frame2_slots[i - 12]);
+  }
+  for i in 18..FRAMES_SIZE {
+    assert_eq!(frames.frames[i], 0);
+  }
+
+  frames.pop();
+  assert_eq!(frames.curr_frame(), 0);
+  for i in 10..FRAMES_SIZE {
+    assert_eq!(frames.frames[i], 0);
+  }
+}
+
 pub const VM_CAPACITY: usize = 13;
 
 pub struct VM {
