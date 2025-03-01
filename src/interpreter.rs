@@ -54,7 +54,7 @@ impl Exp {
         let mut env_obj =
           Obj::Env(Rc::new(RefCell::new(make_env_obj(Some(obj.parent.eval(genv, env)?)))));
         for slot in &obj.slots {
-          slot.exec(genv, env, &mut env_obj);
+          slot.exec(genv, env, &mut env_obj)?;
         }
         Ok(env_obj)
       }
@@ -141,7 +141,7 @@ impl Exp {
       Exp::Set(ref set) => {
         let res = set.exp.eval(genv, env)?;
         get_entry(&set.name[..], genv, env).var()?;
-        set_entry(&set.name, &Entry::Var(res), genv, env);
+        set_entry(&set.name, &Entry::Var(res), genv, env)?;
         Ok(Obj::Null)
       }
       Exp::If(ref iexp) => {
@@ -355,7 +355,7 @@ impl ArrayObj {
 
   /// Sets a value in the array
   pub fn set(&mut self, index: Obj, val: Obj) -> Result<Obj> {
-    if let Some(mut item) = self.arr.get_mut(index.int()?.value as usize) {
+    if let Some(item) = self.arr.get_mut(index.int()?.value as usize) {
       *item = val;
     }
     Ok(Obj::Null)

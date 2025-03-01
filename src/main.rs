@@ -54,7 +54,7 @@ fn main() {
           Ok(p) => p,
           Err(err) => {
             println!("{:?}", err);
-            panic!(err);
+            panic!("{}", err);
           }
         };
         program.print();
