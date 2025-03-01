@@ -1,6 +1,0 @@
-tab_spaces = 2
-chain_one_line_max = 100
-single_line_if_else_max_width = 100
-max_width = 100
-fn_call_width = 100
-closure_block_indent_threshold = 0
