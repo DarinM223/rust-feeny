@@ -1,5 +1,5 @@
-use ast::{Exp, ScopeStmt, SlotStmt};
-use bytecode::{ClassValue, Inst, MethodValue, Program, Value};
+use crate::ast::{Exp, ScopeStmt, SlotStmt};
+use crate::bytecode::{ClassValue, Inst, MethodValue, Program, Value};
 use std::collections::HashMap;
 use std::io;
 

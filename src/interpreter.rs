@@ -1,4 +1,4 @@
-use ast::{Exp, ScopeStmt, SlotStmt};
+use crate::ast::{Exp, ScopeStmt, SlotStmt};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::{Add, Div, Mul, Rem, Sub};
@@ -64,8 +64,7 @@ impl Exp {
             Exp::Slot(ref slot) => {
                 debug!("Getting slot: {}", &slot.name[..]);
                 let env_obj = slot.exp.eval(genv, env)?.env()?;
-                let var_slot = env_obj.borrow().get_result(&slot.name[..])?.var();
-                var_slot
+                env_obj.borrow().get_result(&slot.name[..])?.var()
             }
             Exp::SetSlot(ref setslot) => {
                 debug!("Setting slot: {}", &setslot.name[..]);

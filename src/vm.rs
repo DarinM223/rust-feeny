@@ -1,5 +1,5 @@
-use bytecode::{Inst, MethodValue, Program, Value};
-use interpreter::{EnvObj, EnvObjRef};
+use crate::bytecode::{Inst, MethodValue, Program, Value};
+use crate::interpreter::{EnvObj, EnvObjRef};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
@@ -119,7 +119,7 @@ impl VM {
                 return Err(Error::new(
                     InvalidInput,
                     "Entry function needs to be a method value!",
-                ))
+                ));
             }
         };
 
