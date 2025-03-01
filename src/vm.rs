@@ -80,12 +80,12 @@ impl Frame {
         parent: Option<Box<Frame>>,
     ) -> Frame {
         let slots = vec![Obj::Null; num_slots as usize];
-        let ret_addr = LabelAddr { code: code, pc: pc };
+        let ret_addr = LabelAddr { code, pc };
 
         Frame {
-            slots: slots,
-            ret_addr: ret_addr,
-            parent: parent,
+            slots,
+            ret_addr,
+            parent,
         }
     }
 }
@@ -111,7 +111,7 @@ impl VM {
         let mut global_vars = HashMap::with_capacity(VM_CAPACITY);
         let mut labels = HashMap::with_capacity(VM_CAPACITY);
         let (local_frame, code) = match p.values.get(p.entry as usize) {
-            Some(&Value::Method(ref entry_func)) => {
+            Some(Value::Method(entry_func)) => {
                 let nslots = (entry_func.nargs as i32) + (entry_func.nlocals as i32);
                 (Frame::new(None, 0, nslots, None), entry_func.code.clone())
             }
@@ -126,7 +126,7 @@ impl VM {
         // Initialize global variable constant pool
         for idx in &p.slots {
             match p.values.get(*idx as usize) {
-                Some(&Value::Method(ref m)) => {
+                Some(Value::Method(m)) => {
                     // retrieve the method name from the constant pool
                     let name = get_str_val!(m.name, p, "VM_Method");
                     global_vars.insert(name, Obj::Method(m.clone()));
@@ -164,9 +164,9 @@ impl VM {
         }
 
         Ok(VM {
-            global_vars: global_vars,
-            labels: labels,
-            code: code,
+            global_vars,
+            labels,
+            code,
             pc: 0,
             operand: Vec::new(),
             local_frame: Some(local_frame),
@@ -193,7 +193,7 @@ impl VM {
             }
             Inst::Printf(format, num) => {
                 let format_str = get_str_val!(format, program, "Printf");
-                let args: Vec<_> = (0..num).map(|_| vm.operand.pop()).flat_map(|v| v).collect();
+                let args: Vec<_> = (0..num).flat_map(|_| vm.operand.pop()).collect();
                 debug!("Printf: format \"{}\", args {:?}", format_str, args);
                 let mut args = args.into_iter().rev();
 
@@ -212,7 +212,7 @@ impl VM {
                 vm.operand.push(Obj::Null);
             }
             Inst::Object(class) => {
-                if let Some(&Value::Class(ref classvalue)) = program.values.get(class as usize) {
+                if let Some(Value::Class(classvalue)) = program.values.get(class as usize) {
                     let operand = &mut vm.operand;
                     // For all of the slots in the class value,
                     // pop a value from the operand stack into a list
@@ -234,7 +234,7 @@ impl VM {
 
                     for slot in &classvalue.slots {
                         match program.values.get(*slot as usize) {
-                            Some(&Value::Method(ref m)) => {
+                            Some(Value::Method(m)) => {
                                 let name = get_str_val!(m.name, program, "Object");
                                 obj.add(&name[..], Obj::Method(m.clone()));
                             }
@@ -254,7 +254,9 @@ impl VM {
             Inst::GetSlot(name) => {
                 let name = get_str_val!(name, program, "GetSlot");
                 if let Some(Obj::EnvObj(ref obj)) = vm.operand.pop() {
-                    obj.borrow().get(&name[..]).map(|val| vm.operand.push(val));
+                    if let Some(val) = obj.borrow().get(&name[..]) {
+                        vm.operand.push(val);
+                    }
                 } else {
                     return Err(Error::new(InvalidData, "GetSlot: Not object type"));
                 }
@@ -271,10 +273,7 @@ impl VM {
             }
             Inst::CallSlot(name, num) => {
                 let operand = &mut vm.operand;
-                let mut args: Vec<_> = (0..(num as i32) - 1)
-                    .map(|_| operand.pop())
-                    .flat_map(|v| v)
-                    .collect();
+                let mut args: Vec<_> = (0..(num as i32) - 1).flat_map(|_| operand.pop()).collect();
                 let name = get_str_val!(name, program, "CallSlot");
 
                 match operand.pop() {
@@ -352,7 +351,7 @@ impl VM {
                         });
 
                         let new_frame = Frame {
-                            slots: slots,
+                            slots,
                             ret_addr: LabelAddr {
                                 code: Some(mem::replace(&mut vm.code, code)),
                                 pc: vm.pc,
@@ -406,7 +405,7 @@ impl VM {
             Inst::Branch(name) => {
                 let name = get_str_val!(name, program, "Branch");
                 let pc = match vm.labels.get(&name) {
-                    Some(ref label) => label.pc,
+                    Some(label) => label.pc,
                     _ => return Err(Error::new(InvalidData, "Branch: Invalid name")),
                 };
 
@@ -419,7 +418,7 @@ impl VM {
             Inst::Goto(name) => {
                 let name = get_str_val!(name, program, "Goto");
                 let pc = match vm.labels.get(&name) {
-                    Some(ref label) => label.pc,
+                    Some(label) => label.pc,
                     _ => return Err(Error::new(InvalidData, "Goto: Invalid name")),
                 };
                 debug!("Goto: {} #{}", name, pc);
@@ -428,9 +427,9 @@ impl VM {
             }
             Inst::Call(name, num) => {
                 let operand = &mut vm.operand;
-                let args: Vec<_> = (0..num).map(|_| operand.pop()).flat_map(|v| v).collect();
+                let args: Vec<_> = (0..num).flat_map(|_| operand.pop()).collect();
                 let name = get_str_val!(name, program, "Call");
-                let (code, nslots) = if let Some(&Obj::Method(ref m)) = vm.global_vars.get(&name) {
+                let (code, nslots) = if let Some(Obj::Method(m)) = vm.global_vars.get(&name) {
                     (m.code.clone(), m.nargs as usize + m.nlocals as usize)
                 } else {
                     return Err(Error::new(InvalidData, "Call: Invalid method type"));
@@ -447,7 +446,7 @@ impl VM {
                 debug!("Call: {} slots: {:?}", name, slots);
 
                 let new_frame = Frame {
-                    slots: slots,
+                    slots,
                     ret_addr: LabelAddr {
                         code: Some(mem::replace(&mut vm.code, code)),
                         pc: vm.pc,
@@ -458,16 +457,18 @@ impl VM {
                 vm.pc = -1;
             }
             Inst::Return => {
-                vm.local_frame.take().map(|mut frame| {
+                if let Some(mut frame) = vm.local_frame.take() {
                     if let Some(parent) = frame.parent.take() {
                         vm.local_frame = Some(*parent);
                     }
                     vm.pc = frame.ret_addr.pc;
-                    frame.ret_addr.code.take().map(|code| vm.code = code);
-                });
+                    if let Some(code) = frame.ret_addr.code.take() {
+                        vm.code = code;
+                    }
+                };
 
                 // Return once all of the frames have been returned from
-                if vm.local_frame == None {
+                if vm.local_frame.is_none() {
                     return Ok(EvalResult::Return);
                 }
             }
@@ -480,8 +481,8 @@ impl VM {
 /// Returns an io::Error with InvalidData
 #[inline]
 fn inval_err(name: &str, text: &str) -> io::Result<EvalResult> {
-    return Err(io::Error::new(
+    Err(io::Error::new(
         io::ErrorKind::InvalidData,
         format!("{}: {}", name, text),
-    ));
+    ))
 }

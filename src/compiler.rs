@@ -50,7 +50,7 @@ impl Program {
         let mut got_idx = false;
         {
             if let Some(idx) = name_cache.get(name) {
-                index = idx.clone();
+                index = *idx;
                 got_idx = true;
             }
         }
@@ -256,7 +256,7 @@ impl ScopeStmt {
         match *self {
             ScopeStmt::Var(ref var) => {
                 debug!("Var: name: {:?} exp: {:?}", var.name, var.exp);
-                if *env != None {
+                if env.is_some() {
                     let id = if let Some(ref mut env) = *env {
                         let id = env.values().max().unwrap_or(&-1) + 1;
                         env.insert(var.name.clone(), id);
@@ -343,7 +343,7 @@ impl SlotStmt {
                 let name = program.get_str_id(&met.name[..], name_cache) as i16;
                 let new_method_id = program.add_value(Value::Method(MethodValue {
                     code: Vec::new(),
-                    name: name,
+                    name,
                     nargs: met.nargs as u8,
                     nlocals: 0,
                 }));

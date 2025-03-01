@@ -147,19 +147,16 @@ impl Exp {
                 let exps = read_exps(f, nexps)?;
 
                 Ok(Exp::Printf(PrintfExp {
-                    format: format,
-                    nexps: nexps,
-                    exps: exps,
+                    format,
+                    nexps,
+                    exps,
                 }))
             }
             AstTag::ArrayExp => {
                 let length = Exp::read(f)?;
                 let init = Exp::read(f)?;
 
-                Ok(Exp::Array(Box::new(ArrayExp {
-                    length: length,
-                    init: init,
-                })))
+                Ok(Exp::Array(Box::new(ArrayExp { length, init })))
             }
             AstTag::ObjectExp => {
                 let parent = Exp::read(f)?;
@@ -167,30 +164,23 @@ impl Exp {
                 let slots = read_slots(f, nslots)?;
 
                 Ok(Exp::Object(Box::new(ObjectExp {
-                    parent: parent,
-                    nslots: nslots,
-                    slots: slots,
+                    parent,
+                    nslots,
+                    slots,
                 })))
             }
             AstTag::SlotExp => {
                 let name = read_string(f)?;
                 let exp = Exp::read(f)?;
 
-                Ok(Exp::Slot(Box::new(SlotExp {
-                    name: name,
-                    exp: exp,
-                })))
+                Ok(Exp::Slot(Box::new(SlotExp { name, exp })))
             }
             AstTag::SetSlotExp => {
                 let name = read_string(f)?;
                 let exp = Exp::read(f)?;
                 let value = Exp::read(f)?;
 
-                Ok(Exp::SetSlot(Box::new(SetSlotExp {
-                    name: name,
-                    exp: exp,
-                    value: value,
-                })))
+                Ok(Exp::SetSlot(Box::new(SetSlotExp { name, exp, value })))
             }
             AstTag::CallSlotExp => {
                 let name = read_string(f)?;
@@ -199,10 +189,10 @@ impl Exp {
                 let args = read_exps(f, nargs)?;
 
                 Ok(Exp::CallSlot(Box::new(CallSlotExp {
-                    name: name,
-                    exp: exp,
-                    nargs: nargs,
-                    args: args,
+                    name,
+                    exp,
+                    nargs,
+                    args,
                 })))
             }
             AstTag::CallExp => {
@@ -210,40 +200,26 @@ impl Exp {
                 let nargs = read_int(f)?;
                 let args = read_exps(f, nargs)?;
 
-                Ok(Exp::Call(CallExp {
-                    name: name,
-                    nargs: nargs,
-                    args: args,
-                }))
+                Ok(Exp::Call(CallExp { name, nargs, args }))
             }
             AstTag::SetExp => {
                 let name = read_string(f)?;
                 let exp = Exp::read(f)?;
 
-                Ok(Exp::Set(Box::new(SetExp {
-                    name: name,
-                    exp: exp,
-                })))
+                Ok(Exp::Set(Box::new(SetExp { name, exp })))
             }
             AstTag::IfExp => {
                 let pred = Exp::read(f)?;
                 let conseq = ScopeStmt::read(f)?;
                 let alt = ScopeStmt::read(f)?;
 
-                Ok(Exp::If(Box::new(IfExp {
-                    pred: pred,
-                    conseq: conseq,
-                    alt: alt,
-                })))
+                Ok(Exp::If(Box::new(IfExp { pred, conseq, alt })))
             }
             AstTag::WhileExp => {
                 let pred = Exp::read(f)?;
                 let body = ScopeStmt::read(f)?;
 
-                Ok(Exp::While(Box::new(WhileExp {
-                    pred: pred,
-                    body: body,
-                })))
+                Ok(Exp::While(Box::new(WhileExp { pred, body })))
             }
             AstTag::RefExp => Ok(Exp::Ref(read_string(f)?)),
             _ => Err(AstError::InvalidExpressionType),
@@ -290,10 +266,7 @@ impl SlotStmt {
                 let name = read_string(f)?;
                 let exp = Exp::read(f)?;
 
-                Ok(SlotStmt::Var(SlotVar {
-                    name: name,
-                    exp: exp,
-                }))
+                Ok(SlotStmt::Var(SlotVar { name, exp }))
             }
             AstTag::FnStmt => {
                 let name = read_string(f)?;
@@ -302,10 +275,10 @@ impl SlotStmt {
                 let body = ScopeStmt::read(f)?;
 
                 Ok(SlotStmt::Method(SlotMethod {
-                    name: name,
-                    nargs: nargs,
-                    args: args,
-                    body: body,
+                    name,
+                    nargs,
+                    args,
+                    body,
                 }))
             }
             _ => Err(AstError::InvalidSlotType),
@@ -360,10 +333,7 @@ impl ScopeStmt {
                 let name = read_string(f)?;
                 let exp = Exp::read(f)?;
 
-                Ok(ScopeStmt::Var(ScopeVar {
-                    name: name,
-                    exp: exp,
-                }))
+                Ok(ScopeStmt::Var(ScopeVar { name, exp }))
             }
             AstTag::FnStmt => {
                 let name = read_string(f)?;
@@ -372,17 +342,17 @@ impl ScopeStmt {
                 let body = ScopeStmt::read(f)?;
 
                 Ok(ScopeStmt::Fn(Box::new(ScopeFn {
-                    name: name,
-                    nargs: nargs,
-                    args: args,
-                    body: body,
+                    name,
+                    nargs,
+                    args,
+                    body,
                 })))
             }
             AstTag::SeqStmt => {
                 let a = ScopeStmt::read(f)?;
                 let b = ScopeStmt::read(f)?;
 
-                Ok(ScopeStmt::Seq(Box::new(ScopeSeq { a: a, b: b })))
+                Ok(ScopeStmt::Seq(Box::new(ScopeSeq { a, b })))
             }
             AstTag::ExpStmt => Ok(ScopeStmt::Exp(Exp::read(f)?)),
             _ => Err(AstError::InvalidScopeType),
@@ -529,7 +499,7 @@ impl AstTag {
 
 fn read_int(f: &mut File) -> Result<i32> {
     let mut buf = [0; 4];
-    f.read(&mut buf)?;
+    f.read_exact(&mut buf)?;
     let (b1, b2, b3, b4) = (buf[0] as i32, buf[1] as i32, buf[2] as i32, buf[3] as i32);
     Ok(b1 + (b2 << 8) + (b3 << 16) + (b4 << 24))
 }
@@ -537,7 +507,7 @@ fn read_int(f: &mut File) -> Result<i32> {
 fn read_string(f: &mut File) -> Result<String> {
     let len = read_int(f)?;
     let mut buf = vec![0u8; len as usize];
-    f.read(buf.as_mut_slice())?;
+    f.read_exact(buf.as_mut_slice())?;
 
     Ok(String::from_utf8(buf)?)
 }

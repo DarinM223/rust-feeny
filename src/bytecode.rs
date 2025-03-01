@@ -79,7 +79,7 @@ impl Value {
                 for inst in &method.code {
                     print!("     ");
                     inst.print();
-                    println!("");
+                    println!();
                 }
             }
             Value::Class(ref class) => {
@@ -201,14 +201,14 @@ impl Program {
         for (i, value) in self.values.iter().enumerate() {
             print!("#{}: ", i);
             value.print();
-            println!("");
+            println!();
         }
-        println!("");
+        println!();
         println!("Globals: ");
         for slot in &self.slots {
             println!("#{}    ", slot);
         }
-        println!("");
+        println!();
         println!("Entry: #{}", self.entry);
     }
 }
