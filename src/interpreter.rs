@@ -71,6 +71,43 @@ impl<T> EnvObjVecWrapper<T> {
     }
 }
 
+pub struct ArrayVecWrapper<T>(Vec<Vec<T>>);
+
+impl<T> Default for ArrayVecWrapper<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<T> Index<ArrayObjIdx> for ArrayVecWrapper<T> {
+    type Output = Vec<T>;
+
+    fn index(&self, index: ArrayObjIdx) -> &Self::Output {
+        if cfg!(debug_assertions) {
+            &self.0[index.0]
+        } else {
+            unsafe { self.0.get_unchecked(index.0) }
+        }
+    }
+}
+
+impl<T> IndexMut<ArrayObjIdx> for ArrayVecWrapper<T> {
+    fn index_mut(&mut self, index: ArrayObjIdx) -> &mut Self::Output {
+        if cfg!(debug_assertions) {
+            &mut self.0[index.0]
+        } else {
+            unsafe { self.0.get_unchecked_mut(index.0) }
+        }
+    }
+}
+
+impl<T> ArrayVecWrapper<T> {
+    pub fn add(&mut self, elem: Vec<T>) -> ArrayObjIdx {
+        self.0.push(elem);
+        ArrayObjIdx(self.0.len() - 1)
+    }
+}
+
 pub struct EnvironmentStore<T> {
     pub genv: EnvObj<T>,
     pub env_store: EnvObjVecWrapper<T>,

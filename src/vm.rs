@@ -1,5 +1,5 @@
 use crate::bytecode::{Inst, MethodValue, Program, Value};
-use crate::interpreter::{EnvObj, EnvObjIdx, EnvironmentStore};
+use crate::interpreter::{ArrayObjIdx, ArrayVecWrapper, EnvObj, EnvObjIdx, EnvironmentStore};
 use std::collections::HashMap;
 use std::io;
 use std::io::Error;
@@ -36,7 +36,7 @@ pub enum EvalResult {
 pub enum Obj {
     Int(i32),
     Null,
-    Array(Vec<Obj>),
+    Array(ArrayObjIdx),
     Method(MethodValue),
     EnvObj(EnvObjIdx),
 }
@@ -93,6 +93,7 @@ pub const VM_CAPACITY: usize = 13;
 pub struct VM {
     // Variable and label name-to-value maps
     store: EnvironmentStore<Obj>,
+    array_store: ArrayVecWrapper<Obj>,
     labels: HashMap<String, LabelAddr>,
 
     code: Vec<Inst>,
@@ -163,6 +164,7 @@ impl VM {
 
         Ok(VM {
             store: EnvironmentStore::from_table(global_vars),
+            array_store: Default::default(),
             labels,
             code,
             pc: 0,
@@ -183,7 +185,8 @@ impl VM {
             },
             Inst::Array => {
                 if let (Some(init), Some(Obj::Int(len))) = (vm.operand.pop(), vm.operand.pop()) {
-                    vm.operand.push(Obj::Array(vec![init; len as usize]));
+                    let array_idx = vm.array_store.add(vec![init; len as usize]);
+                    vm.operand.push(Obj::Array(array_idx));
                 } else {
                     return Err(Error::new(InvalidData, "Invalid length type for ARRAY"));
                 }
@@ -301,10 +304,12 @@ impl VM {
                             _ => return Err(Error::new(InvalidData, "CallSlot: Invalid operator")),
                         });
                     }
-                    Some(Obj::Array(mut arr)) => {
-                        debug!("Array slot: {:?} for {:?}", name, arr);
+                    Some(Obj::Array(arr_idx)) => {
+                        debug!("Array slot: {:?} for {:?}", name, vm.array_store[arr_idx]);
                         match &name[..] {
-                            "length" => operand.push(Obj::Int(arr.len() as i32)),
+                            "length" => {
+                                operand.push(Obj::Int(vm.array_store[arr_idx].len() as i32))
+                            }
                             "set" => {
                                 if num != 3 {
                                     return inval_err("CallSlot", "Arity must be 3");
@@ -314,7 +319,7 @@ impl VM {
                                     Obj::Int(i) => i as usize,
                                     _ => return inval_err("CallSlot", "Set index not int"),
                                 };
-                                arr[index] = data;
+                                vm.array_store[arr_idx][index] = data;
                                 operand.push(Obj::Null);
                             }
                             "get" => {
@@ -325,7 +330,7 @@ impl VM {
                                     Obj::Int(i) => i as usize,
                                     _ => return inval_err("CallSlot", "Set index not int"),
                                 };
-                                operand.push(arr[index].clone());
+                                operand.push(vm.array_store[arr_idx][index].clone());
                             }
                             _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
                         }
