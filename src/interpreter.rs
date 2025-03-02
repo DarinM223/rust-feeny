@@ -34,9 +34,46 @@ pub struct EnvObjIdx(usize);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ArrayObjIdx(usize);
 
+pub struct EnvObjVecWrapper<T>(Vec<EnvObj<T>>);
+
+impl<T> Default for EnvObjVecWrapper<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<T> Index<EnvObjIdx> for EnvObjVecWrapper<T> {
+    type Output = EnvObj<T>;
+
+    fn index(&self, index: EnvObjIdx) -> &Self::Output {
+        if cfg!(debug_assertions) {
+            &self.0[index.0]
+        } else {
+            unsafe { self.0.get_unchecked(index.0) }
+        }
+    }
+}
+
+impl<T> IndexMut<EnvObjIdx> for EnvObjVecWrapper<T> {
+    fn index_mut(&mut self, index: EnvObjIdx) -> &mut Self::Output {
+        if cfg!(debug_assertions) {
+            &mut self.0[index.0]
+        } else {
+            unsafe { self.0.get_unchecked_mut(index.0) }
+        }
+    }
+}
+
+impl<T> EnvObjVecWrapper<T> {
+    pub fn add(&mut self, env_obj: EnvObj<T>) -> EnvObjIdx {
+        self.0.push(env_obj);
+        EnvObjIdx(self.0.len() - 1)
+    }
+}
+
 pub struct EnvironmentStore<T> {
     pub genv: EnvObj<T>,
-    pub env_store: Vec<EnvObj<T>>,
+    pub env_store: EnvObjVecWrapper<T>,
 }
 
 impl<T> Default for EnvironmentStore<T> {
@@ -52,7 +89,7 @@ impl<T> Index<EnvObjIdx> for EnvironmentStore<T> {
     type Output = EnvObj<T>;
 
     fn index(&self, index: EnvObjIdx) -> &Self::Output {
-        &self.env_store[index.0]
+        &self.env_store[index]
     }
 }
 
@@ -68,8 +105,7 @@ impl<T: Clone> EnvironmentStore<T> {
     }
 
     pub fn add_env(&mut self, env_obj: EnvObj<T>) -> EnvObjIdx {
-        self.env_store.push(env_obj);
-        EnvObjIdx(self.env_store.len() - 1)
+        self.env_store.add(env_obj)
     }
 
     /// Retrieves an entry from the environment.
@@ -78,7 +114,7 @@ impl<T: Clone> EnvironmentStore<T> {
     pub fn get<'a>(&self, name: &str, env: &'a mut Obj) -> T {
         let mut ent = None;
         if let &mut Obj::Env(env_idx) = env {
-            ent = self.env_store[env_idx.0].get(&self.env_store, name);
+            ent = self.env_store[env_idx].get(&self.env_store, name);
         }
         if ent.is_none() {
             ent = self.genv.get(&self.env_store, name);
@@ -93,7 +129,7 @@ impl<T: Clone> EnvironmentStore<T> {
     pub fn set(&mut self, name: &str, entry: &T, env: &mut Obj) -> Result<()> {
         let mut in_env = false;
         if let Obj::Env(env_idx) = *env {
-            if self.env_store[env_idx.0].contains(&self.env_store, name) {
+            if self.env_store[env_idx].contains(&self.env_store, name) {
                 self.add(env_idx, name, entry);
                 in_env = true;
             }
@@ -110,9 +146,9 @@ impl<T: Clone> EnvironmentStore<T> {
 
     /// Adds key value pair to the environment at the given index.
     pub fn add(&mut self, env_idx: EnvObjIdx, name: &str, entry: &T) {
-        let mut env_obj = std::mem::take(&mut self.env_store[env_idx.0]);
+        let mut env_obj = std::mem::take(&mut self.env_store[env_idx]);
         env_obj.add(&mut self.env_store, name, entry.clone());
-        self.env_store[env_idx.0] = env_obj;
+        self.env_store[env_idx] = env_obj;
     }
 
     /// Adds key value pair to global environment.
@@ -128,13 +164,21 @@ impl Index<ArrayObjIdx> for ArrayStore {
     type Output = ArrayObj;
 
     fn index(&self, index: ArrayObjIdx) -> &Self::Output {
-        &self.0[index.0]
+        if cfg!(debug_assertions) {
+            &self.0[index.0]
+        } else {
+            unsafe { self.0.get_unchecked(index.0) }
+        }
     }
 }
 
 impl IndexMut<ArrayObjIdx> for ArrayStore {
     fn index_mut(&mut self, index: ArrayObjIdx) -> &mut Self::Output {
-        &mut self.0[index.0]
+        if cfg!(debug_assertions) {
+            &mut self.0[index.0]
+        } else {
+            unsafe { self.0.get_unchecked_mut(index.0) }
+        }
     }
 }
 
@@ -579,14 +623,14 @@ impl<T: Clone> EnvObj<T> {
     }
 
     /// Adds a new entry to the environment object
-    pub fn add(&mut self, env_store: &mut Vec<EnvObj<T>>, name: &str, entry: T) {
+    pub fn add(&mut self, env_store: &mut EnvObjVecWrapper<T>, name: &str, entry: T) {
         if !self.add_parent(env_store, name, &entry) {
             self.table.insert(name.to_owned(), entry);
         }
     }
 
     /// Retrieves an entry from the environment object
-    pub fn get(&self, env_store: &Vec<EnvObj<T>>, name: &str) -> Option<T> {
+    pub fn get(&self, env_store: &EnvObjVecWrapper<T>, name: &str) -> Option<T> {
         if let Some(data) = self.table.get(name) {
             return Some(data.clone());
         }
@@ -594,11 +638,11 @@ impl<T: Clone> EnvObj<T> {
         let mut parent_env = self.parent;
 
         while let Some(env_idx) = parent_env {
-            if let Some(data) = env_store[env_idx.0].get(env_store, name) {
+            if let Some(data) = env_store[env_idx].get(env_store, name) {
                 return Some(data.clone());
             }
 
-            parent_env = env_store[env_idx.0].parent;
+            parent_env = env_store[env_idx].parent;
         }
 
         None
@@ -606,7 +650,7 @@ impl<T: Clone> EnvObj<T> {
 
     /// Same as get() but returns a Result<> instead of an Option<>
     #[inline]
-    pub fn get_result(&self, env_store: &Vec<EnvObj<T>>, name: &str) -> Result<T> {
+    fn get_result(&self, env_store: &EnvObjVecWrapper<T>, name: &str) -> Result<T> {
         match self.get(env_store, name) {
             Some(item) => Ok(item),
             None => Err(InterpretError::CannotFind(name.to_string())),
@@ -615,7 +659,7 @@ impl<T: Clone> EnvObj<T> {
 
     /// Returns true if the object contains an entry with the given key,
     /// false otherwise
-    pub fn contains(&self, env_store: &Vec<EnvObj<T>>, name: &str) -> bool {
+    fn contains(&self, env_store: &EnvObjVecWrapper<T>, name: &str) -> bool {
         self.get(env_store, name).is_some()
     }
 
@@ -623,7 +667,7 @@ impl<T: Clone> EnvObj<T> {
     /// the first parent that contains the name
     /// and adds and sets the entry to that parent object.
     /// Returns whether the attempt was successful
-    fn add_parent(&mut self, env_store: &mut Vec<EnvObj<T>>, name: &str, entry: &T) -> bool {
+    fn add_parent(&mut self, env_store: &mut EnvObjVecWrapper<T>, name: &str, entry: &T) -> bool {
         if self.table.contains_key(name) {
             self.table.insert(name.to_owned(), entry.clone());
             return true;
@@ -634,7 +678,7 @@ impl<T: Clone> EnvObj<T> {
 
         while let Some(env_idx) = parent_env {
             let mut has_target_env = false;
-            if env_store[env_idx.0].table.contains_key(name) {
+            if env_store[env_idx].table.contains_key(name) {
                 has_target_env = true;
             }
             if has_target_env {
@@ -642,11 +686,11 @@ impl<T: Clone> EnvObj<T> {
                 break;
             }
 
-            parent_env = env_store[env_idx.0].parent;
+            parent_env = env_store[env_idx].parent;
         }
 
         if let Some(env_idx) = target_env {
-            env_store[env_idx.0]
+            env_store[env_idx]
                 .table
                 .insert(name.to_owned(), entry.clone());
             true
