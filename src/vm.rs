@@ -1,12 +1,10 @@
 use crate::bytecode::{Inst, MethodValue, Program, Value};
-use crate::interpreter::{EnvObj, EnvObjRef};
-use std::cell::RefCell;
+use crate::interpreter::{ArrayObjIdx, ArrayVecWrapper, EnvObj, EnvObjIdx, EnvironmentStore};
 use std::collections::HashMap;
 use std::io;
 use std::io::Error;
 use std::io::ErrorKind::*;
 use std::mem;
-use std::rc::Rc;
 
 /// Interprets the bytecode structure
 pub fn interpret_bc(program: Program) -> io::Result<()> {
@@ -38,9 +36,9 @@ pub enum EvalResult {
 pub enum Obj {
     Int(i32),
     Null,
-    Array(Rc<RefCell<Vec<Obj>>>),
+    Array(ArrayObjIdx),
     Method(MethodValue),
-    EnvObj(EnvObjRef<Obj>),
+    EnvObj(EnvObjIdx),
 }
 
 impl Obj {
@@ -93,8 +91,9 @@ impl Frame {
 pub const VM_CAPACITY: usize = 13;
 
 pub struct VM {
-    // Global variable and label name-to-value maps
-    global_vars: HashMap<String, Obj>,
+    // Variable and label name-to-value maps
+    store: EnvironmentStore<Obj>,
+    array_store: ArrayVecWrapper<Obj>,
     labels: HashMap<String, LabelAddr>,
 
     code: Vec<Inst>,
@@ -164,7 +163,8 @@ impl VM {
         }
 
         Ok(VM {
-            global_vars,
+            store: EnvironmentStore::from_table(global_vars),
+            array_store: Default::default(),
             labels,
             code,
             pc: 0,
@@ -185,8 +185,8 @@ impl VM {
             },
             Inst::Array => {
                 if let (Some(init), Some(Obj::Int(len))) = (vm.operand.pop(), vm.operand.pop()) {
-                    vm.operand
-                        .push(Obj::Array(Rc::new(RefCell::new(vec![init; len as usize]))));
+                    let array_idx = vm.array_store.add(vec![init; len as usize]);
+                    vm.operand.push(Obj::Array(array_idx));
                 } else {
                     return Err(Error::new(InvalidData, "Invalid length type for ARRAY"));
                 }
@@ -236,25 +236,25 @@ impl VM {
                         match program.values.get(*slot as usize) {
                             Some(Value::Method(m)) => {
                                 let name = get_str_val!(m.name, program, "Object");
-                                obj.add(&name[..], Obj::Method(m.clone()));
+                                obj.add(&mut vm.store.env_store, &name[..], Obj::Method(m.clone()));
                             }
                             Some(&Value::Slot(name)) => {
                                 let name = get_str_val!(name, program, "Object");
-                                obj.add(&name[..], args.next().unwrap());
+                                obj.add(&mut vm.store.env_store, &name[..], args.next().unwrap());
                             }
                             _ => {}
                         }
                     }
 
-                    operand.push(Obj::EnvObj(Rc::new(RefCell::new(obj))));
+                    operand.push(Obj::EnvObj(vm.store.add_env(obj)));
                 } else {
                     return Err(Error::new(InvalidInput, "Object: Invalid index"));
                 }
             }
             Inst::GetSlot(name) => {
                 let name = get_str_val!(name, program, "GetSlot");
-                if let Some(Obj::EnvObj(ref obj)) = vm.operand.pop() {
-                    if let Some(val) = obj.borrow().get(&name[..]) {
+                if let Some(Obj::EnvObj(env_idx)) = vm.operand.pop() {
+                    if let Some(val) = vm.store[env_idx].get(&vm.store.env_store, &name[..]) {
                         vm.operand.push(val);
                     }
                 } else {
@@ -263,9 +263,10 @@ impl VM {
             }
             Inst::SetSlot(name) => {
                 let name = get_str_val!(name, program, "SetSlot");
-                if let (Some(value), Some(Obj::EnvObj(obj))) = (vm.operand.pop(), vm.operand.pop())
+                if let (Some(value), Some(Obj::EnvObj(env_idx))) =
+                    (vm.operand.pop(), vm.operand.pop())
                 {
-                    obj.borrow_mut().add(&name[..], value.clone());
+                    vm.store.add(env_idx, &name[..], &value);
                     vm.operand.push(value);
                 } else {
                     return Err(Error::new(InvalidData, "SetSlot: Not object type"));
@@ -303,10 +304,12 @@ impl VM {
                             _ => return Err(Error::new(InvalidData, "CallSlot: Invalid operator")),
                         });
                     }
-                    Some(Obj::Array(arr)) => {
-                        debug!("Array slot: {:?} for {:?}", name, arr);
+                    Some(Obj::Array(arr_idx)) => {
+                        debug!("Array slot: {:?} for {:?}", name, vm.array_store[arr_idx]);
                         match &name[..] {
-                            "length" => operand.push(Obj::Int(arr.borrow().len() as i32)),
+                            "length" => {
+                                operand.push(Obj::Int(vm.array_store[arr_idx].len() as i32))
+                            }
                             "set" => {
                                 if num != 3 {
                                     return inval_err("CallSlot", "Arity must be 3");
@@ -316,7 +319,7 @@ impl VM {
                                     Obj::Int(i) => i as usize,
                                     _ => return inval_err("CallSlot", "Set index not int"),
                                 };
-                                arr.borrow_mut()[index] = data;
+                                vm.array_store[arr_idx][index] = data;
                                 operand.push(Obj::Null);
                             }
                             "get" => {
@@ -327,24 +330,25 @@ impl VM {
                                     Obj::Int(i) => i as usize,
                                     _ => return inval_err("CallSlot", "Set index not int"),
                                 };
-                                operand.push(arr.borrow()[index].clone());
+                                operand.push(vm.array_store[arr_idx][index].clone());
                             }
                             _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
                         }
                     }
-                    Some(Obj::EnvObj(obj)) => {
+                    Some(Obj::EnvObj(env_idx)) => {
                         debug!("Object slot: {:?}", name);
-                        let (code, nslots) = match obj.borrow().get(&name[..]) {
-                            Some(Obj::Method(m)) => {
-                                (m.code.clone(), m.nargs as usize + m.nlocals as usize + 1)
-                            }
-                            _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
-                        };
+                        let (code, nslots) =
+                            match vm.store[env_idx].get(&vm.store.env_store, &name[..]) {
+                                Some(Obj::Method(m)) => {
+                                    (m.code.clone(), m.nargs as usize + m.nlocals as usize + 1)
+                                }
+                                _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
+                            };
 
                         let mut slots = vec![Obj::Null; nslots];
                         // Slot 0 in the new local frame holds the receiver object
                         // Following slots hold argument values from last-popped to first-popped
-                        slots[0] = Obj::EnvObj(obj);
+                        slots[0] = Obj::EnvObj(env_idx);
                         args.into_iter().rev().fold(1, |index, arg| {
                             slots[index] = arg;
                             index + 1
@@ -387,11 +391,11 @@ impl VM {
                     None => return Err(Error::new(InvalidData, "SetGlobal: Op Stack empty")),
                 };
 
-                vm.global_vars.insert(name, value);
+                vm.store.add_global(&name, &value);
             }
             Inst::GetGlobal(name) => {
                 let name = get_str_val!(name, program, "GetGlobal");
-                let value = match vm.global_vars.get(&name) {
+                let value = match vm.store.genv.get(&vm.store.env_store, &name) {
                     Some(v) => v.clone(),
                     None => return Err(Error::new(InvalidData, "GetGlobal: Invalid name")),
                 };
@@ -429,11 +433,12 @@ impl VM {
                 let operand = &mut vm.operand;
                 let args: Vec<_> = (0..num).flat_map(|_| operand.pop()).collect();
                 let name = get_str_val!(name, program, "Call");
-                let (code, nslots) = if let Some(Obj::Method(m)) = vm.global_vars.get(&name) {
-                    (m.code.clone(), m.nargs as usize + m.nlocals as usize)
-                } else {
-                    return Err(Error::new(InvalidData, "Call: Invalid method type"));
-                };
+                let (code, nslots) =
+                    if let Some(Obj::Method(m)) = vm.store.genv.get(&vm.store.env_store, &name) {
+                        (m.code.clone(), m.nargs as usize + m.nlocals as usize)
+                    } else {
+                        return Err(Error::new(InvalidData, "Call: Invalid method type"));
+                    };
 
                 let mut slots = vec![Obj::Null; nslots];
                 // Populate slots with the argument values from
