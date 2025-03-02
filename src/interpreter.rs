@@ -1,6 +1,6 @@
 use crate::ast::{Exp, ScopeStmt, SlotStmt};
 use std::collections::HashMap;
-use std::ops::{Add, Div, Index, Mul, Rem, Sub};
+use std::ops::{Add, Div, Index, IndexMut, Mul, Rem, Sub};
 use std::result;
 
 #[derive(Debug, PartialEq)]
@@ -132,6 +132,19 @@ impl Index<ArrayObjIdx> for ArrayStore {
     }
 }
 
+impl IndexMut<ArrayObjIdx> for ArrayStore {
+    fn index_mut(&mut self, index: ArrayObjIdx) -> &mut Self::Output {
+        &mut self.0[index.0]
+    }
+}
+
+impl ArrayStore {
+    pub fn add_array(&mut self, obj: ArrayObj) -> ArrayObjIdx {
+        self.0.push(obj);
+        ArrayObjIdx(self.0.len() - 1)
+    }
+}
+
 #[derive(Default)]
 pub struct Params {
     store: EnvironmentStore<Entry>,
@@ -160,7 +173,8 @@ impl Exp {
             Exp::Array(ref array) => {
                 let length = array.length.eval(params, env)?;
                 let init = array.init.eval(params, env)?;
-                Ok(Obj::Array(ArrayObj::new(length, init)?))
+                let array_idx = params.array_store.add_array(ArrayObj::new(length, init)?);
+                Ok(Obj::Array(array_idx))
             }
             Exp::Object(ref obj) => {
                 let new_env = make_env_obj(Some(obj.parent.eval(params, env)?));
@@ -190,7 +204,7 @@ impl Exp {
             }
             Exp::CallSlot(ref cs) => {
                 debug!("Calling slot: {}", &cs.name[..]);
-                let mut obj = cs.exp.eval(params, env)?;
+                let obj = cs.exp.eval(params, env)?;
                 match obj {
                     Obj::Int(iexp) => {
                         let other = cs.args[0].eval(params, env)?.int()?;
@@ -208,16 +222,16 @@ impl Exp {
                             _ => Err(InterpretError::InvalidSlot),
                         }
                     }
-                    Obj::Array(ref mut arr) => match &cs.name[..] {
-                        "length" => Ok(Obj::Int(arr.length())),
+                    Obj::Array(arr_idx) => match &cs.name[..] {
+                        "length" => Ok(Obj::Int(params.array_store[arr_idx].length())),
                         "set" => {
                             let name = cs.args[0].eval(params, env)?;
                             let param = cs.args[1].eval(params, env)?;
-                            Ok(arr.set(name, param)?)
+                            Ok(params.array_store[arr_idx].set(name, param)?)
                         }
                         "get" => {
                             let name = cs.args[0].eval(params, env)?;
-                            Ok(arr.get(name)?.unwrap_or(Obj::Null))
+                            Ok(params.array_store[arr_idx].get(name)?.unwrap_or(Obj::Null))
                         }
                         _ => Err(InterpretError::InvalidSlot),
                     },
@@ -356,7 +370,7 @@ impl ScopeStmt {
 pub enum Obj {
     Null,
     Int(IntObj),
-    Array(ArrayObj),
+    Array(ArrayObjIdx),
     Env(EnvObjIdx),
 }
 
@@ -400,9 +414,9 @@ impl Obj {
 
     /// Returns the unwrapped array object as a Result<>
     #[inline]
-    pub fn array(self) -> Result<ArrayObj> {
+    pub fn array(&self) -> Result<ArrayObjIdx> {
         match self {
-            Obj::Array(arr) => Ok(arr),
+            Obj::Array(arr) => Ok(*arr),
             _ => Err(InterpretError::ObjShouldBeArray),
         }
     }
