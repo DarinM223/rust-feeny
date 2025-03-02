@@ -29,6 +29,11 @@ pub fn interpret(stmt: ScopeStmt) -> Result<()> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EnvObjIdx(usize);
 
+/// A wrapper around an index into a Vec of array
+/// objects.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArrayObjIdx(usize);
+
 pub struct EnvironmentStore<T> {
     pub genv: EnvObj<T>,
     pub env_store: Vec<EnvObj<T>>,
@@ -116,9 +121,26 @@ impl<T: Clone> EnvironmentStore<T> {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ArrayStore(Vec<ArrayObj>);
+
+impl Index<ArrayObjIdx> for ArrayStore {
+    type Output = ArrayObj;
+
+    fn index(&self, index: ArrayObjIdx) -> &Self::Output {
+        &self.0[index.0]
+    }
+}
+
+#[derive(Default)]
+pub struct Params {
+    store: EnvironmentStore<Entry>,
+    array_store: ArrayStore,
+}
+
 impl Exp {
     /// Evaluates an expression given a local and global environment
-    pub fn eval(&self, store: &mut EnvironmentStore<Entry>, env: &mut Obj) -> Result<Obj> {
+    pub fn eval(&self, params: &mut Params, env: &mut Obj) -> Result<Obj> {
         match *self {
             Exp::Int(i) => Ok(Obj::Int(IntObj { value: i })),
             Exp::Null => Ok(Obj::Null),
@@ -126,7 +148,7 @@ impl Exp {
                 let mut counter = 0;
                 for ch in printf.format.chars() {
                     if ch == '~' {
-                        let res = printf.exps[counter].eval(store, env)?;
+                        let res = printf.exps[counter].eval(params, env)?;
                         print!("{}", res.int()?.value);
                         counter += 1;
                     } else {
@@ -136,40 +158,42 @@ impl Exp {
                 Ok(Obj::Null)
             }
             Exp::Array(ref array) => {
-                let length = array.length.eval(store, env)?;
-                let init = array.init.eval(store, env)?;
+                let length = array.length.eval(params, env)?;
+                let init = array.init.eval(params, env)?;
                 Ok(Obj::Array(ArrayObj::new(length, init)?))
             }
             Exp::Object(ref obj) => {
-                let new_env = make_env_obj(Some(obj.parent.eval(store, env)?));
-                let new_env_idx = store.add_env(new_env);
+                let new_env = make_env_obj(Some(obj.parent.eval(params, env)?));
+                let new_env_idx = params.store.add_env(new_env);
                 let mut env_obj = Obj::Env(new_env_idx);
                 for slot in &obj.slots {
-                    slot.exec(store, env, &mut env_obj)?;
+                    slot.exec(params, env, &mut env_obj)?;
                 }
                 Ok(env_obj)
             }
             Exp::Slot(ref slot) => {
                 debug!("Getting slot: {}", &slot.name[..]);
-                let env_idx = slot.exp.eval(store, env)?.env()?;
-                store[env_idx]
-                    .get_result(&store.env_store, &slot.name[..])?
+                let env_idx = slot.exp.eval(params, env)?.env()?;
+                params.store[env_idx]
+                    .get_result(&params.store.env_store, &slot.name[..])?
                     .var()
             }
             Exp::SetSlot(ref setslot) => {
                 debug!("Setting slot: {}", &setslot.name[..]);
-                let env_idx = setslot.exp.eval(store, env)?.env()?;
-                let value = setslot.value.eval(store, env)?;
-                store.add(env_idx, &setslot.name[..], &Entry::Var(value));
+                let env_idx = setslot.exp.eval(params, env)?.env()?;
+                let value = setslot.value.eval(params, env)?;
+                params
+                    .store
+                    .add(env_idx, &setslot.name[..], &Entry::Var(value));
 
                 Ok(Obj::Null)
             }
             Exp::CallSlot(ref cs) => {
                 debug!("Calling slot: {}", &cs.name[..]);
-                let mut obj = cs.exp.eval(store, env)?;
+                let mut obj = cs.exp.eval(params, env)?;
                 match obj {
                     Obj::Int(iexp) => {
-                        let other = cs.args[0].eval(store, env)?.int()?;
+                        let other = cs.args[0].eval(params, env)?.int()?;
                         match &cs.name[..] {
                             "add" => Ok(Obj::Int(iexp + other)),
                             "sub" => Ok(Obj::Int(iexp - other)),
@@ -187,19 +211,19 @@ impl Exp {
                     Obj::Array(ref mut arr) => match &cs.name[..] {
                         "length" => Ok(Obj::Int(arr.length())),
                         "set" => {
-                            let name = cs.args[0].eval(store, env)?;
-                            let param = cs.args[1].eval(store, env)?;
+                            let name = cs.args[0].eval(params, env)?;
+                            let param = cs.args[1].eval(params, env)?;
                             Ok(arr.set(name, param)?)
                         }
                         "get" => {
-                            let name = cs.args[0].eval(store, env)?;
+                            let name = cs.args[0].eval(params, env)?;
                             Ok(arr.get(name)?.unwrap_or(Obj::Null))
                         }
                         _ => Err(InterpretError::InvalidSlot),
                     },
                     Obj::Env(env_idx) => {
-                        let (fun, args) = store[env_idx]
-                            .get_result(&store.env_store, &cs.name[..])?
+                        let (fun, args) = params.store[env_idx]
+                            .get_result(&params.store.env_store, &cs.name[..])?
                             .clone()
                             .func()?;
                         if cs.nargs as usize != args.len() {
@@ -208,22 +232,27 @@ impl Exp {
 
                         let mut new_env = EnvObj::new(None);
                         for (i, arg) in cs.args.iter().enumerate() {
-                            let var_entry = Entry::Var(arg.eval(store, env)?);
-                            new_env.add(&mut store.env_store, &args[i][..], var_entry);
+                            let var_entry = Entry::Var(arg.eval(params, env)?);
+                            new_env.add(&mut params.store.env_store, &args[i][..], var_entry);
                         }
-                        new_env.add(&mut store.env_store, "this", Entry::Var(Obj::Env(env_idx)));
+                        new_env.add(
+                            &mut params.store.env_store,
+                            "this",
+                            Entry::Var(Obj::Env(env_idx)),
+                        );
 
-                        let mut env_entry = Obj::Env(store.add_env(new_env));
-                        fun.eval(store, &mut env_entry)
+                        let mut env_entry = Obj::Env(params.store.add_env(new_env));
+                        fun.eval(params, &mut env_entry)
                     }
                     _ => unreachable!(),
                 }
             }
             Exp::Call(ref call) => {
                 debug!("Calling function: {}", &call.name[..]);
-                let (fun, args) = store
+                let (fun, args) = params
+                    .store
                     .genv
-                    .get_result(&store.env_store, &call.name[..])?
+                    .get_result(&params.store.env_store, &call.name[..])?
                     .clone()
                     .func()?;
                 if call.nargs as usize != args.len() {
@@ -232,33 +261,33 @@ impl Exp {
 
                 let mut new_env = EnvObj::new(None);
                 for (i, arg) in call.args.iter().enumerate() {
-                    let var_entry = Entry::Var(arg.eval(store, env)?);
-                    new_env.add(&mut store.env_store, &args[i][..], var_entry);
+                    let var_entry = Entry::Var(arg.eval(params, env)?);
+                    new_env.add(&mut params.store.env_store, &args[i][..], var_entry);
                 }
 
-                let new_env_idx = store.add_env(new_env);
-                fun.eval(store, &mut Obj::Env(new_env_idx))
+                let new_env_idx = params.store.add_env(new_env);
+                fun.eval(params, &mut Obj::Env(new_env_idx))
             }
             Exp::Set(ref set) => {
-                let res = set.exp.eval(store, env)?;
-                store.get(&set.name[..], env).var()?;
-                store.set(&set.name, &Entry::Var(res), env)?;
+                let res = set.exp.eval(params, env)?;
+                params.store.get(&set.name[..], env).var()?;
+                params.store.set(&set.name, &Entry::Var(res), env)?;
                 Ok(Obj::Null)
             }
             Exp::If(ref iexp) => {
-                let pred = iexp.pred.eval(store, env)?;
+                let pred = iexp.pred.eval(params, env)?;
                 match pred {
-                    Obj::Null => iexp.alt.eval(store, env),
-                    _ => iexp.conseq.eval(store, env),
+                    Obj::Null => iexp.alt.eval(params, env),
+                    _ => iexp.conseq.eval(params, env),
                 }
             }
             Exp::While(ref wexp) => {
-                while let Obj::Int(_) = wexp.pred.eval(store, env)? {
-                    wexp.body.eval(store, env)?;
+                while let Obj::Int(_) = wexp.pred.eval(params, env)? {
+                    wexp.body.eval(params, env)?;
                 }
                 Ok(Obj::Null)
             }
-            Exp::Ref(ref name) => Ok(store.get(name, env).var()?.clone()),
+            Exp::Ref(ref name) => Ok(params.store.get(name, env).var()?.clone()),
         }
     }
 }
@@ -266,20 +295,17 @@ impl Exp {
 impl SlotStmt {
     /// Execute a slot statement given a local and global environment and
     /// the object that contains the slot
-    pub fn exec(
-        &self,
-        store: &mut EnvironmentStore<Entry>,
-        env: &mut Obj,
-        obj: &mut Obj,
-    ) -> Result<()> {
+    pub fn exec(&self, params: &mut Params, env: &mut Obj, obj: &mut Obj) -> Result<()> {
         let env_idx = obj.env()?;
         match *self {
             SlotStmt::Var(ref var) => {
-                let var_exp = var.exp.eval(store, env)?;
-                store.add(env_idx, &var.name[..], &Entry::Var(var_exp));
+                let var_exp = var.exp.eval(params, env)?;
+                params
+                    .store
+                    .add(env_idx, &var.name[..], &Entry::Var(var_exp));
             }
             SlotStmt::Method(ref met) => {
-                store.add(
+                params.store.add(
                     env_idx,
                     &met.name[..],
                     &Entry::Func(met.body.clone(), met.args.clone()),
@@ -292,31 +318,35 @@ impl SlotStmt {
 
 impl ScopeStmt {
     /// Evaluates a scope statement given a local and global environment
-    pub fn eval(&self, store: &mut EnvironmentStore<Entry>, env: &mut Obj) -> Result<Obj> {
+    pub fn eval(&self, params: &mut Params, env: &mut Obj) -> Result<Obj> {
         match *self {
             ScopeStmt::Var(ref var) => {
                 debug!("Var: {}", &var.name[..]);
-                let entry_obj = var.exp.eval(store, env)?;
+                let entry_obj = var.exp.eval(params, env)?;
                 if let Obj::Env(env_idx) = *env {
-                    store.add(env_idx, &var.name[..], &Entry::Var(entry_obj));
+                    params
+                        .store
+                        .add(env_idx, &var.name[..], &Entry::Var(entry_obj));
                 } else {
-                    store.add_global(&var.name[..], &Entry::Var(entry_obj));
+                    params
+                        .store
+                        .add_global(&var.name[..], &Entry::Var(entry_obj));
                 }
                 Ok(Obj::Null)
             }
             ScopeStmt::Fn(ref fun) => {
                 debug!("Function: {}", &fun.name[..]);
-                store.add_global(
+                params.store.add_global(
                     &fun.name[..],
                     &Entry::Func(fun.body.clone(), fun.args.clone()),
                 );
                 Ok(Obj::Null)
             }
             ScopeStmt::Seq(ref seq) => {
-                seq.a.eval(store, env)?;
-                Ok(seq.b.eval(store, env)?)
+                seq.a.eval(params, env)?;
+                Ok(seq.b.eval(params, env)?)
             }
-            ScopeStmt::Exp(ref exp) => Ok(exp.eval(store, env)?),
+            ScopeStmt::Exp(ref exp) => Ok(exp.eval(params, env)?),
         }
     }
 }
