@@ -371,10 +371,10 @@ impl VM {
                     Some(v) => v.clone(),
                     None => return Err(Error::new(InvalidData, "SetLocal: Op stack empty")),
                 };
-                get_mut_ref!(vm.local_frame).slots[idx as usize] = value;
+                vm.local_frame.as_mut().unwrap().slots[idx as usize] = value;
             }
             Inst::GetLocal(idx) => {
-                let value = match get_ref!(vm.local_frame).slots.get(idx as usize) {
+                let value = match vm.local_frame.as_ref().unwrap().slots.get(idx as usize) {
                     Some(v) => v.clone(),
                     _ => return Err(Error::new(InvalidInput, "GetLocal: Invalid index")),
                 };

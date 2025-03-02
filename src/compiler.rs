@@ -48,11 +48,9 @@ impl Program {
     pub fn get_str_id(&mut self, name: &str, name_cache: &mut HashMap<String, usize>) -> usize {
         let mut index = 0;
         let mut got_idx = false;
-        {
-            if let Some(idx) = name_cache.get(name) {
-                index = *idx;
-                got_idx = true;
-            }
+        if let Some(idx) = name_cache.get(name) {
+            index = *idx;
+            got_idx = true;
         }
 
         if !got_idx {

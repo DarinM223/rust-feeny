@@ -483,7 +483,7 @@ impl<T: Clone + PartialEq> EnvObj<T> {
     /// and adds and sets the entry to that parent object.
     /// Returns whether the attempt was successful
     fn add_parent(&mut self, name: &str, entry: &T) -> bool {
-        if self.table.get_mut(name).is_some() {
+        if self.table.contains_key(name) {
             self.table.insert(name.to_owned(), entry.clone());
             return true;
         }
@@ -493,10 +493,8 @@ impl<T: Clone + PartialEq> EnvObj<T> {
 
         while let Some(env) = parent_env.take() {
             let mut has_target_env = false;
-            {
-                if env.borrow().table.contains_key(name) {
-                    has_target_env = true;
-                }
+            if env.borrow().table.contains_key(name) {
+                has_target_env = true;
             }
             if has_target_env {
                 target_env = Some(env);
@@ -551,7 +549,7 @@ fn get_entry<'a>(name: &str, genv: &'a mut EnvObj<Entry>, env: &'a mut Obj) -> E
 fn set_entry(name: &str, entry: &Entry, genv: &mut EnvObj<Entry>, env: &mut Obj) -> Result<()> {
     let mut in_env = false;
     if let &mut Obj::Env(ref mut env) = env {
-        if env.borrow().get(name).is_some() {
+        if env.borrow().contains(name) {
             env.borrow_mut().add(name, entry.clone());
             in_env = true;
         }
