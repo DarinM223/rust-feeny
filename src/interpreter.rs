@@ -148,7 +148,7 @@ impl<T: Clone> EnvironmentStore<T> {
     /// Retrieves an entry from the environment.
     /// It first attempts to retrieve from the local environment and
     /// if that fails then it attempts to retrieve from the global environment
-    pub fn get<'a>(&self, name: &str, env: &'a mut Obj) -> T {
+    pub fn get(&self, name: &str, env: &mut Obj) -> T {
         let mut ent = None;
         if let &mut Obj::Env(env_idx) = env {
             ent = self.env_store[env_idx].get(&self.env_store, name);
