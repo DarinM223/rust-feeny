@@ -251,9 +251,7 @@ impl VM {
             Inst::GetSlot(name) => {
                 let name = get_str_val!(name, program, "GetSlot");
                 if let Some(Obj::EnvObj(env_idx)) = vm.operand.pop() {
-                    if let Some(val) =
-                        vm.store.env_store[env_idx.0].get(&vm.store.env_store, &name[..])
-                    {
+                    if let Some(val) = vm.store[env_idx].get(&vm.store.env_store, &name[..]) {
                         vm.operand.push(val);
                     }
                 } else {
@@ -334,14 +332,13 @@ impl VM {
                     }
                     Some(Obj::EnvObj(env_idx)) => {
                         debug!("Object slot: {:?}", name);
-                        let (code, nslots) = match vm.store.env_store[env_idx.0]
-                            .get(&vm.store.env_store, &name[..])
-                        {
-                            Some(Obj::Method(m)) => {
-                                (m.code.clone(), m.nargs as usize + m.nlocals as usize + 1)
-                            }
-                            _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
-                        };
+                        let (code, nslots) =
+                            match vm.store[env_idx].get(&vm.store.env_store, &name[..]) {
+                                Some(Obj::Method(m)) => {
+                                    (m.code.clone(), m.nargs as usize + m.nlocals as usize + 1)
+                                }
+                                _ => return Err(Error::new(InvalidData, "CallSlot: Invalid name")),
+                            };
 
                         let mut slots = vec![Obj::Null; nslots];
                         // Slot 0 in the new local frame holds the receiver object

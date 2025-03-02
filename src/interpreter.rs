@@ -1,6 +1,6 @@
 use crate::ast::{Exp, ScopeStmt, SlotStmt};
 use std::collections::HashMap;
-use std::ops::{Add, Div, Mul, Rem, Sub};
+use std::ops::{Add, Div, Index, Mul, Rem, Sub};
 use std::result;
 
 #[derive(Debug, PartialEq)]
@@ -24,6 +24,11 @@ pub fn interpret(stmt: ScopeStmt) -> Result<()> {
     Ok(())
 }
 
+/// A wrapper around an index into a Vec of environment
+/// objects.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EnvObjIdx(usize);
+
 pub struct EnvironmentStore<T> {
     pub genv: EnvObj<T>,
     pub env_store: Vec<EnvObj<T>>,
@@ -35,6 +40,14 @@ impl<T> Default for EnvironmentStore<T> {
             genv: Default::default(),
             env_store: Default::default(),
         }
+    }
+}
+
+impl<T> Index<EnvObjIdx> for EnvironmentStore<T> {
+    type Output = EnvObj<T>;
+
+    fn index(&self, index: EnvObjIdx) -> &Self::Output {
+        &self.env_store[index.0]
     }
 }
 
@@ -139,7 +152,7 @@ impl Exp {
             Exp::Slot(ref slot) => {
                 debug!("Getting slot: {}", &slot.name[..]);
                 let env_idx = slot.exp.eval(store, env)?.env()?;
-                store.env_store[env_idx.0]
+                store[env_idx]
                     .get_result(&store.env_store, &slot.name[..])?
                     .var()
             }
@@ -185,7 +198,7 @@ impl Exp {
                         _ => Err(InterpretError::InvalidSlot),
                     },
                     Obj::Env(env_idx) => {
-                        let (fun, args) = store.env_store[env_idx.0]
+                        let (fun, args) = store[env_idx]
                             .get_result(&store.env_store, &cs.name[..])?
                             .clone()
                             .func()?;
@@ -307,11 +320,6 @@ impl ScopeStmt {
         }
     }
 }
-
-/// A wrapper around an index into a Vec of environment
-/// objects.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct EnvObjIdx(pub usize);
 
 /// An object used by the interpreter
 #[derive(Clone, Debug, PartialEq)]
